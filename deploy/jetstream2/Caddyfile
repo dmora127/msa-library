@@ -23,22 +23,37 @@
 		reverse_proxy pgweb:8081
 	}
 
-	# Everything else is the API. Permissive CORS so browser-based clients can
-	# call it cross-origin. NOTE: with Allow-Origin "*" you cannot also send
-	# credentials (cookies); the X-API-Key header works as long as it's listed
-	# in Allow-Headers below.
+	# Everything else is the API.
+	#
+	# CORS is owned by the APP (app/main.py, CORSMiddleware), not by this file,
+	# so the origin allowlist lives with the code and covers only the public
+	# read endpoints (/v1/stats, /v1/query).
+	#
+	# The edge-CORS version is kept below, commented out, in case we ever want
+	# to move it back here (e.g. to keep serving CORS headers when the app is
+	# down or 500ing, which the app-side version cannot do). If you re-enable
+	# it, REMOVE or narrow the CORSMiddleware block in app/main.py first —
+	# running both is the trap:
+	#   - Caddy's `header` directive REPLACES the upstream value, so this would
+	#     silently widen the app's allowlist back to "*";
+	#   - `respond @options 204` answers preflights before the app sees them,
+	#     making the app's allow_methods/allow_headers dead config.
+	#
+	# handle {
+	# 	header {
+	# 		Access-Control-Allow-Origin "*"
+	# 		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+	# 		Access-Control-Allow-Headers "Content-Type, X-API-Key, Authorization"
+	# 		Access-Control-Max-Age "86400"
+	# 	}
+	# 	# Short-circuit the CORS preflight (browser sends OPTIONS before the
+	# 	# real POST) so it never reaches the API.
+	# 	@options method OPTIONS
+	# 	respond @options 204
+	#
+	# 	reverse_proxy api:8000
+	# }
 	handle {
-		header {
-			Access-Control-Allow-Origin "*"
-			Access-Control-Allow-Methods "GET, POST, OPTIONS"
-			Access-Control-Allow-Headers "Content-Type, X-API-Key, Authorization"
-			Access-Control-Max-Age "86400"
-		}
-		# Short-circuit the CORS preflight (browser sends OPTIONS before the
-		# real POST) so it never reaches the API.
-		@options method OPTIONS
-		respond @options 204
-
 		reverse_proxy api:8000
 	}
 }
