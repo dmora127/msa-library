@@ -1,0 +1,18 @@
+#cloud-config
+# Paste into Exosphere/Horizon "Boot Script / cloud-init" when creating the
+# instance. Installs Docker + compose plugin and enables it on boot. Volume
+# format/mount is done manually (device name varies) — see README.md.
+package_update: true
+package_upgrade: true
+
+write_files:
+  - path: /etc/sysctl.d/99-af3.conf
+    content: |
+      vm.overcommit_memory=1
+
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker ubuntu || usermod -aG docker exouser || true
+  - systemctl enable --now docker
+  - sysctl --system
+  - mkdir -p /opt/af3-cache

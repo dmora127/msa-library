@@ -1,0 +1,97 @@
+# af3-cache — Jetstream2 API + HTTPS (phase 2). Run TOGETHER with the DB file:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.api.yml \
+#       up -d --build api caddy
+#
+# `api` joins the same project network as `db` (reaches it as db:5432 via
+# DATABASE_URL in .env.prod). Only Caddy is public (80/443); the API itself
+# publishes no host port. Requires ./.env.api (see .env.api.example).
+
+name: af3cache
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        # pelican CLI baked into the image by the Dockerfile's `pelican` stage.
+        # Bump here to upgrade, then rebuild `api` (and `migrate`).
+        PELICAN_VERSION: "7.25.0"
+    restart: unless-stopped
+    env_file:
+      - ./.env.prod        # DATABASE_URL (host `db`), DB creds
+      - ./.env.api         # API keys, TOKEN/OSDF impl, PUBLIC_HOST, stores
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"             # internal only; Caddy proxies to it
+    volumes:
+      # Host /opt/diamond (binary + swissprot DB) visible inside the container
+      # at the same path, read-only. Matches DIAMOND_BINARY/DIAMOND_DB in
+      # .env.api. NOTE: /opt/diamond MUST exist on the host (empty dir is fine
+      # for noop classifier deployments — `sudo mkdir -p /opt/diamond`).
+      - /opt/diamond:/opt/diamond:ro
+      # TOKEN_ISSUER_IMPL=pelican: the issuer's private key must be readable
+      # inside the container. Mount it read-only and point PELICAN_TOKEN_PRIVATE_KEY
+      # (.env.api) at the in-container path. Uncomment + adjust the host path:
+      - /home/exouser/private-key.pem:/keys/community.pem:ro
+      #
+      # OSDF_CLIENT_IMPL=pelican: the pelican CLI itself is BAKED INTO the image
+      # (Dockerfile `pelican` stage, PELICAN_VERSION above) at
+      # /usr/local/bin/pelican — matching PELICAN_TOKEN_BINARY /
+      # OSDF_PELICAN_BINARY in .env.api. Do NOT bind-mount a host pelican over
+      # that path: the mount would shadow the pinned binary. Only the OSDF
+      # *credentials* are mounted (secrets never go in the image); the container
+      # runs as root, so pelican reads them from $HOME=/root:
+      - /home/exouser/.config/pelican:/root/.config/pelican:ro
+    healthcheck:
+      test: ["CMD", "python", "-c",
+              "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # Web DB console (pgweb), reachable ONLY through Caddy at
+  # https://$PUBLIC_HOST/webdbinterface — publishes no host port. pgweb enforces
+  # its own HTTP basic auth (PGWEB_AUTH_USER/PGWEB_AUTH_PASS in .env.api), which
+  # is what a browser can satisfy (the API's X-API-Key header can't be sent by a
+  # plain URL navigation). --prefix makes pgweb serve under /webdbinterface so
+  # its asset URLs line up with the Caddy route. Connects to `db` over the
+  # shared compose network via PGWEB_DATABASE_URL (plain postgres://, not
+  # +asyncpg). Replaces the old ad-hoc `docker run --rm pgweb` + SSH tunnel.
+  pgweb:
+    image: sosedoff/pgweb:latest
+    restart: unless-stopped
+    env_file:
+      - ./.env.api         # PGWEB_DATABASE_URL, PGWEB_AUTH_USER, PGWEB_AUTH_PASS
+    # The image ENTRYPOINT already passes --bind=0.0.0.0 --listen=8081; only add
+    # the URL prefix here (command is appended to the entrypoint).
+    command:
+      - --prefix=webdbinterface
+    expose:
+      - "8081"             # internal only; Caddy proxies /webdbinterface to it
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file: ./.env.api   # PUBLIC_HOST used by the Caddyfile
+    ports:
+      - "80:80"            # ACME HTTP-01 challenge
+      - "443:443"          # public HTTPS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data   # persisted LE certs (survives restarts)
+      - caddy_config:/config
+    depends_on:
+      - api
+      - pgweb
+
+volumes:
+  caddy_data:
+  caddy_config:

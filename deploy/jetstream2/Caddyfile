@@ -1,0 +1,44 @@
+# TLS mode is env-driven so re-syncing this file never breaks a running VM.
+# CADDY_TLS (set in .env.api) holds the literal tls directive:
+#   CADDY_TLS=tls internal   -> Caddy local CA (sslip.io / no trusted domain).
+#                               Clients need -k / the local CA. PoC only.
+#   CADDY_TLS=                -> empty: automatic Let's Encrypt for PUBLIC_HOST
+#                               (use only with a real domain you control —
+#                               sslip.io is LE-rate-limited).
+#   CADDY_TLS=tls you@example.com  -> ACME with that contact email.
+#
+# PUBLIC_HOST + CADDY_TLS come from .env.api (preserved on the VM, never
+# rsynced), so this committed file is safe to overwrite on every deploy.
+
+{$PUBLIC_HOST} {
+	{$CADDY_TLS}
+	encode gzip
+
+	# Admin DB console. pgweb runs with --prefix=webdbinterface, so it expects
+	# the prefix in the path -> forward it unchanged (handle, not handle_path).
+	# Auth is pgweb's own HTTP basic auth (PGWEB_AUTH_USER/PASS), prompted by the
+	# browser. handle blocks are mutually exclusive and matched top-down.
+	@webdb path /webdbinterface /webdbinterface/*
+	handle @webdb {
+		reverse_proxy pgweb:8081
+	}
+
+	# Everything else is the API. Permissive CORS so browser-based clients can
+	# call it cross-origin. NOTE: with Allow-Origin "*" you cannot also send
+	# credentials (cookies); the X-API-Key header works as long as it's listed
+	# in Allow-Headers below.
+	handle {
+		header {
+			Access-Control-Allow-Origin "*"
+			Access-Control-Allow-Methods "GET, POST, OPTIONS"
+			Access-Control-Allow-Headers "Content-Type, X-API-Key, Authorization"
+			Access-Control-Max-Age "86400"
+		}
+		# Short-circuit the CORS preflight (browser sends OPTIONS before the
+		# real POST) so it never reaches the API.
+		@options method OPTIONS
+		respond @options 204
+
+		reverse_proxy api:8000
+	}
+}

@@ -1,0 +1,44 @@
+# af3-cache — Jetstream2 DATABASE deployment (private Postgres 16).
+#
+# Postgres is bound to 127.0.0.1 only: not reachable from the internet even if
+# the security group is misconfigured. The FastAPI app (later) connects either
+# as a container on this compose network (host `db`) or via 127.0.0.1:5432.
+#
+# Data lives on the attached Jetstream2 volume mounted at /mnt/pgdata.
+#
+#   docker compose -f docker-compose.prod.yml up -d db
+#   docker compose -f docker-compose.prod.yml --profile tools run --rm migrate
+#
+# Requires ./.env.prod (copy .env.prod.example, set a strong password).
+
+name: af3cache
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: ./.env.prod
+    ports:
+      - "127.0.0.1:5432:5432"      # localhost-only; DB stays private
+    volumes:
+      - /mnt/pgdata/data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 30s
+
+  # One-shot schema migrator (alembic upgrade head). Not started by default;
+  # run explicitly after `db` is healthy. Built from the repo Dockerfile.
+  migrate:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    env_file: ./.env.prod
+    entrypoint: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    profiles: ["tools"]
+    restart: "no"

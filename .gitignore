@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.ruff_cache/
+*.sqlite
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.DS_Store
+*.pem
+.env*
+*.env*
+# local agent settings (mirrors .dockerignore)
+.claude/
+
+# stray credential artifacts
+tok.en
+*.jwt
+
+# ...but the committed templates are not secrets
+!*.example
