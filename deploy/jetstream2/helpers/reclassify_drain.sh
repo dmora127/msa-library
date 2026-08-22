@@ -17,7 +17,7 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$HERE"
+cd "$HERE/.."   # scripts live in helpers/; compose files + .env live one level up
 
 if [[ ! -r ./.env.api ]]; then
   echo "$(date -u +%FT%TZ) drain: .env.api missing" >&2

@@ -21,13 +21,31 @@ services:
     ports:
       - "127.0.0.1:5432:5432"      # localhost-only; DB stays private
     volumes:
-      - /mnt/pgdata/data:/var/lib/postgresql/data
+      # Long form with create_host_path:false is DELIBERATE and load-bearing.
+      # /mnt/pgdata is a symlink to /media/volume/af3-cache-volume, mounted by
+      # Exosphere via a udev-triggered unit that has NO ordering relationship to
+      # docker.service (and is NOT in /etc/fstab). If Docker wins that boot race,
+      # the short form would silently CREATE /mnt/pgdata/data on the root disk and
+      # Postgres would initdb an empty cluster -- "a healthy-looking API with no
+      # data" (see docs/redeploy.md). With create_host_path:false, Compose errors
+      # out and db simply never starts. Fail closed.
+      - type: bind
+        source: /mnt/pgdata/data
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 12
     stop_grace_period: 30s
+    # Host has ZERO swap, so an unbounded leak becomes an abrupt kernel OOM kill
+    # that picks its victim by heuristic. Observed steady state: ~234 MiB.
+    mem_limit: 4g
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
 
   # One-shot schema migrator (alembic upgrade head). Not started by default;
   # run explicitly after `db` is healthy. Built from the repo Dockerfile.

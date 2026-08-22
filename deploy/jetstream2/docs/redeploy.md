@@ -298,23 +298,47 @@ prompts for `PGWEB_AUTH_USER`/`PGWEB_AUTH_PASS`).
 
 ## Phase 9 — Cron
 
-The helper scripts do **not** work from `helpers/` as committed: `backup.sh`,
-`reclassify.sh` and `reclassify_drain.sh` each `cd` to their own directory and
-then look for `./.env.prod`, `./.env.api` and `docker-compose.prod.yml`, which
-live one level up. Fix them (`cd "$HERE/.."`) or drive them with env overrides
-before wiring cron. `recover_stuck_uploads.sh` uses an absolute `DEPLOY_DIR` and
-works as-is.
+All helper scripts now `cd "$HERE/.."` and work correctly from `helpers/`.
+(They previously did not — that, plus cron still pointing at the pre-`helpers/`
+paths, silently broke both backups for weeks. **Whenever you move or rename a
+helper, run it by hand once before trusting cron.**)
 
 ```bash
 crontab -e
-# MAILTO=you@example.edu
-# 15 4 * * *   /opt/af3-cache/deploy/jetstream2/helpers/backup.sh >> /mnt/pgdata/backups/backup.log 2>&1
-# */15 * * * * /opt/af3-cache/deploy/jetstream2/helpers/recover_stuck_uploads.sh
+MAILTO=you@example.edu
+
+# Daily dump -> pgdata volume (/dev/sdd), 14-day retention.
+15 4 * * *   /opt/af3-cache/deploy/jetstream2/helpers/backup.sh >> /mnt/pgdata/backups/backup.log 2>&1
+
+# Weekly validated dump -> a DIFFERENT physical device (/dev/sdb). -Fc format,
+# size floor, and a pg_restore --list integrity check.
+0 6 * * 0    ENV_FILE=/opt/af3-cache/deploy/jetstream2/.env.prod BACKUP_DIR=/media/volume/application-backup/af3cache /opt/af3-cache/deploy/jetstream2/helpers/af3cache_backup.sh >> /home/exouser/logs/backup.log 2>&1
+
+# Re-drive ingestions stuck in 'uploaded' (idempotent, lockfile-guarded).
+*/15 * * * * /opt/af3-cache/deploy/jetstream2/helpers/recover_stuck_uploads.sh >> /mnt/pgdata/backups/recover_stuck_uploads.log 2>&1
+
+# Data-volume mount guard (see Phase 2 warning). Publishes af3cache_pgdata_mounted.
+*/5 * * * *  /opt/af3-cache/deploy/jetstream2/helpers/volume_guard.sh
+
 # 30 * * * *   /opt/af3-cache/deploy/jetstream2/helpers/reclassify.sh >> /mnt/pgdata/backups/reclassify.log 2>&1   # diamond only
 ```
 
+> **Do NOT schedule `POST /v1/admin/maintenance/run` (the mark-stale + reap job).**
+> On a live instance `OSDF_CLIENT_IMPL=pelican`, so `reap()` issues real
+> `pelican object rm` calls. `Community Contributed - Cached` has
+> `idle_ttl_days=90`, and `last_accessed_at` only advances on a query *hit*, so
+> at production query volume almost nothing is ever refreshed — enabling this
+> would begin permanently deleting community-contributed `.a3m` objects. It needs
+> an explicit retention decision and a `dry_run` mode first.
+
+`MAILTO` only works if a mail transport is installed — `postfix` is masked on the
+Exosphere base image, so cron mail is silently discarded until you install
+`msmtp` + `msmtp-mta` and configure a relay. **Verify with a deliberate failure**;
+an unverified alert path is the same as no alert path.
+
 On-volume dumps only protect against logical errors — also take Exosphere volume
-snapshots and copy dumps off-VM.
+snapshots and copy dumps off-VM. The weekly job above writes to `/dev/sdb`
+specifically so the two copies do not share a device.
 
 ---
 

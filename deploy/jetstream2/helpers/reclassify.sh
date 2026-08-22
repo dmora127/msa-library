@@ -5,7 +5,7 @@
 # species + query_name on confident hits.
 #
 # Cron (crontab -e):
-#   30 * * * * /opt/af3-cache/deploy/jetstream2/reclassify.sh >> /mnt/pgdata/backups/reclassify.log 2>&1
+#   30 * * * * /opt/af3-cache/deploy/jetstream2/helpers/reclassify.sh >> /mnt/pgdata/backups/reclassify.log 2>&1
 #
 # Usage:  ./reclassify.sh [LIMIT]   (default LIMIT=200)
 #
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$HERE"
+cd "$HERE/.."   # scripts live in helpers/; compose files + .env live one level up
 
 if [[ ! -r ./.env.api ]]; then
   echo "$(date -u +%FT%TZ) reclassify: .env.api missing" >&2

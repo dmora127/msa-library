@@ -53,6 +53,14 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    # Zero swap on this host -> no soft landing for a leak. This is a FLOOR, not
+    # slack: PelicanCliOsdfClient reads a whole a3m into memory and
+    # verify_concurrency=4 x max_upload_size_bytes=100MB is ~400MB worst case.
+    # Observed steady state: ~73 MiB.
+    mem_limit: 2g
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
 
   # Web DB console (pgweb), reachable ONLY through Caddy at
   # https://$PUBLIC_HOST/webdbinterface — publishes no host port. pgweb enforces
@@ -63,8 +71,14 @@ services:
   # shared compose network via PGWEB_DATABASE_URL (plain postgres://, not
   # +asyncpg). Replaces the old ad-hoc `docker run --rm pgweb` + SSH tunnel.
   pgweb:
-    image: sosedoff/pgweb:latest
+    # Pinned by digest (was :latest, which had already restarted twice on a
+    # silent upstream change). This is v0.17.0; bump deliberately.
+    image: sosedoff/pgweb@sha256:a5256d416e2e8b92d69a4459058e3eca33a9f075d8325491644411d0bc3bd70b
     restart: unless-stopped
+    mem_limit: 512m
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
     env_file:
       - ./.env.api         # PGWEB_DATABASE_URL, PGWEB_AUTH_USER, PGWEB_AUTH_PASS
     # The image ENTRYPOINT already passes --bind=0.0.0.0 --listen=8081; only add
@@ -80,6 +94,10 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
     env_file: ./.env.api   # PUBLIC_HOST used by the Caddyfile
     ports:
       - "80:80"            # ACME HTTP-01 challenge

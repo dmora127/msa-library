@@ -5,9 +5,11 @@
 # Jetstream2 VM.
 #
 # Install (one-time):
-#   chmod +x /opt/af3-cache/deploy/jetstream2/af3cache_backup.sh
+#   chmod +x /opt/af3-cache/deploy/jetstream2/helpers/af3cache_backup.sh
 #   crontab -e   # add:
-#     0 6 * * * /opt/af3-cache/deploy/jetstream2/af3cache_backup.sh \
+#     0 6 * * 0 ENV_FILE=/opt/af3-cache/deploy/jetstream2/.env.prod \
+#               BACKUP_DIR=/media/volume/application-backup/af3cache \
+#               /opt/af3-cache/deploy/jetstream2/helpers/af3cache_backup.sh \
 #               >> /home/exouser/logs/backup.log 2>&1
 #
 # Exits non-zero (so cron MAILTO fires) on:
@@ -20,7 +22,7 @@
 
 set -euo pipefail
 
-ENV_FILE="${ENV_FILE:-/opt/af3-cache/.env}"
+ENV_FILE="${ENV_FILE:-/opt/af3-cache/deploy/jetstream2/.env.prod}"
 BACKUP_DIR="${BACKUP_DIR:-/home/exouser/backups}"
 LOG_DIR="${LOG_DIR:-/home/exouser/logs}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
@@ -31,7 +33,13 @@ MIN_DUMP_BYTES="${MIN_DUMP_BYTES:-1024}"
 LOCK_FILE="${LOCK_FILE:-/tmp/af3cache-backup.lock}"
 
 log() { printf '%s [backup] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
-die() { log "ERROR: $*"; exit 1; }
+
+# Dead-man's switch -- see backup.sh for the rationale.
+[ -r "${HOME:-/home/exouser}/.af3cache-monitoring.env" ] && . "${HOME:-/home/exouser}/.af3cache-monitoring.env"
+HC="${HC_BACKUP_WEEKLY_URL:-}"
+hc() { [ -n "$HC" ] && curl -fsS -m 10 --retry 3 "${HC}${1:-}" >/dev/null 2>&1; return 0; }
+
+die() { log "ERROR: $*"; hc /fail; exit 1; }
 
 # Single-instance lock — prevents overlap if a previous run is still going
 # (e.g. dump took longer than the cron interval).
@@ -86,3 +94,4 @@ DELETED=$(find "$BACKUP_DIR" -maxdepth 1 -name 'af3cache-*.dump' \
 log "retention sweep: removed $DELETED dumps older than ${RETENTION_DAYS}d"
 
 log "done"
+hc
