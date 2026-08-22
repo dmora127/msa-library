@@ -1,0 +1,836 @@
+# Generated alert rules for af3-cache. Provisioned = file is the
+# source of truth; edits in the Grafana UI are reverted on restart.
+apiVersion: 1
+groups:
+- orgId: 1
+  name: af3cache
+  folder: af3-cache
+  interval: 1m
+  rules:
+  - uid: af3-vol-unmounted
+    title: Data volume not mounted
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(af3cache_pgdata_mounted)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: /mnt/pgdata is not the attached volume. Postgres may be on an empty root-disk
+        cluster -- /healthz will still return ok. See docs/redeploy.md boot-race note.'
+  - uid: af3-entries-collapse
+    title: Cache entries collapsed
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(af3cache_entries_total_count)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 400000
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: msa_cache_entries dropped below 400k (baseline 465,433). Data-side signature
+        of the empty-cluster boot race.'
+  - uid: af3-api-down
+    title: Public API unreachable
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(probe_success{job="blackbox-healthz"})
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: the public HTTPS endpoint stopped answering.'
+  - uid: af3-stats-endpoint-failing
+    title: /v1/stats probe failing
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(last_over_time(probe_success{job="blackbox-stats"}[25m]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 25m
+    labels:
+      severity: warning
+    annotations:
+      summary: The public /v1/stats endpoint failed its probe while /healthz is still answering -- suspect
+        the database or the stats query itself.
+  - uid: af3-postgres-down
+    title: Postgres down
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(pg_up)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: Alerting
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: postgres-exporter cannot reach the database.'
+  - uid: af3-disk-critical
+    title: Disk critically low
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(node_filesystem_avail_bytes{mountpoint=~"/|/media/volume/af3-cache-volume"} / node_filesystem_size_bytes{mountpoint=~"/|/media/volume/af3-cache-volume"})
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0.05
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 15m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: less than 5% free on / or the pgdata volume.'
+  - uid: af3-oom
+    title: Container OOM-killed
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: max(increase(container_oom_events_total{name=~"af3cache-.*"}[1h]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: a container was OOM-killed. The host has ZERO swap, so this is abrupt and the
+        kernel picks the victim by heuristic.'
+  - uid: af3-disk-warning
+    title: Disk low
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(node_filesystem_avail_bytes{mountpoint=~"/|/media/volume/af3-cache-volume"} / node_filesystem_size_bytes{mountpoint=~"/|/media/volume/af3-cache-volume"})
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0.15
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: Less than 15% free on / or the pgdata volume.
+  - uid: af3-mem-low
+    title: Host memory low
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(node_memory_MemAvailable_bytes)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 2000000000.0
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: Under 2 GB available. With zero swap this is the OOM precursor.
+  - uid: af3-restart-loop
+    title: Container restarting repeatedly
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: max(changes(container_start_time_seconds{name=~"af3cache-.*"}[1h]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 3
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: A container restarted more than 3 times in an hour.
+  - uid: af3-cert-expiry
+    title: 'TLS cert near expiry (tls internal: 12h certs)'
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(probe_ssl_earliest_cert_expiry{job="blackbox-healthz"} - time())
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 3600
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'Certificate expires in under 1 hour -- Caddy auto-renewal may have broken. NOTE: threshold
+        is 1h because tls internal issues 12h certs.'
+  - uid: af3-ingest-stuck
+    title: Ingestions stuck in 'uploaded'
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: max(af3cache_ingestions_count{status="uploaded"})
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 20
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: More than 20 ingestions stuck in 'uploaded'. helpers/recover_stuck_uploads.sh runs every
+        15 min; check its log.
+  - uid: af3-target-down
+    title: Prometheus target down
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: min(up{job!~"blackbox-.*"})
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 1
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 15m
+    labels:
+      severity: warning
+    annotations:
+      summary: A scrape target has been unreachable for 15 minutes.
+  - uid: af3-a3m-capacity-warn
+    title: A3M storage above 80% of quota
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(af3cache_a3m_bytes) / 50e12 * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 80
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: A3M objects now exceed 80% of the 50 TB quota. Time to plan more storage or a retention
+        policy.
+  - uid: af3-a3m-capacity-crit
+    title: A3M storage above 92% of quota
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(af3cache_a3m_bytes) / 50e12 * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 92
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: NoData
+    execErrState: Error
+    for: 30m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: A3M objects exceed 92% of the 50 TB quota. Uploads will start failing when it
+        fills.'
+  - uid: af3-a3m-fills-soon
+    title: A3M storage projected to fill within 30 days
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: ((50e12 - sum(af3cache_a3m_bytes)) / deriv(sum(af3cache_a3m_bytes)[7d:1h])) > 0
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 2592000
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 2h
+    labels:
+      severity: warning
+    annotations:
+      summary: At the last 7 days' growth rate, A3M storage fills the 50 TB quota within 30 days. Linear
+        extrapolation -- sanity-check against the 'A3M bytes by source' panel before acting.
+  - uid: af3-reap-exposure
+    title: Reaper exposure growing (informational)
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(af3cache_reap_exposure_would_go_stale)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: Entries now exceed their source's idle_ttl_days and WOULD be deleted if the maintenance/reap
+        job were enabled. It is deliberately NOT scheduled. This is a read-only exposure count, not an
+        action.

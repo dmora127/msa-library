@@ -10,7 +10,11 @@ set -euo pipefail
 # Dead-man's switch. Silence from this job is itself the alert: healthchecks.io
 # notifies when the pings STOP, which catches a deleted cron line or a dead VM --
 # failure modes that a "mail me on error" design structurally cannot see.
-[ -r "${HOME:-/home/exouser}/.af3cache-monitoring.env" ] && . "${HOME:-/home/exouser}/.af3cache-monitoring.env"
+# Ping URLs live beside the rest of the deploy config. Path is derived from
+# this script's own location, so a clone at a different prefix still works.
+_SD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MONITORING_ENV="${MONITORING_ENV:-$_SD/../.af3cache-monitoring.env}"
+[ -r "$MONITORING_ENV" ] && . "$MONITORING_ENV"
 HC="${HC_BACKUP_DAILY_URL:-}"
 hc() { [ -n "$HC" ] && curl -fsS -m 10 --retry 3 "${HC}${1:-}" >/dev/null 2>&1; return 0; }
 trap 'hc /fail' ERR

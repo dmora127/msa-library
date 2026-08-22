@@ -1,0 +1,73 @@
+# Custom queries for postgres-exporter, run as the READ-ONLY af3_exporter role.
+#
+# Architectural line: DB-shaped facts come from here, request-shaped facts come
+# from the app's /metrics (Phase 3). This keeps expensive COUNT(*) queries off
+# the request path -- GET /v1/stats is 8 scalar subqueries over a 465k-row table
+# and must never be scraped every 30s.
+#
+# EVERY query here is a plain SELECT. Nothing in this file mutates anything.
+
+af3cache_ingestions:
+  query: "select status::text as status, count(*) as count from public.msa_ingestions group by 1"
+  metrics:
+    - status: { usage: "LABEL", description: "ingestion status" }
+    - count:  { usage: "GAUGE", description: "ingestions by status" }
+
+af3cache_entries:
+  query: "select source, status::text as status, count(*) as count from public.msa_cache_entries group by 1,2"
+  metrics:
+    - source: { usage: "LABEL", description: "MSA source" }
+    - status: { usage: "LABEL", description: "entry status" }
+    - count:  { usage: "GAUGE", description: "cache entries by source and status" }
+
+# Data-side detector for the /mnt/pgdata boot race: if Postgres ever comes up on
+# an empty root-disk cluster, this collapses to 0 while /healthz still says ok.
+# Baseline at 2026-08-22: 465433.
+af3cache_entries_total:
+  query: "select count(*) as count from public.msa_cache_entries"
+  metrics:
+    - count: { usage: "GAUGE", description: "total cache entries (volume-loss canary)" }
+
+# READ-ONLY exposure metric for the reaper. Counts what WOULD go stale if the
+# maintenance job were ever enabled. It does NOT act, and the maintenance job is
+# deliberately NOT scheduled -- see the crontab guardrail and docs/redeploy.md.
+# Filtered to sources that actually have a TTL (only 'Community Contributed -
+# Cached' does; the other seven are NULL = never culled).
+af3cache_reap_exposure:
+  query: >
+    select e.source,
+           count(*) as would_go_stale
+    from public.msa_cache_entries e
+    join public.msa_sources s on e.source = s.name
+    where s.idle_ttl_days is not null
+      and e.status = 'active'
+      and e.last_accessed_at < now() - make_interval(days => s.idle_ttl_days)
+    group by 1
+  metrics:
+    - source:         { usage: "LABEL", description: "source with a non-null idle_ttl_days" }
+    - would_go_stale: { usage: "GAUGE", description: "entries the reaper WOULD delete if enabled" }
+
+af3cache_queries:
+  query: "select coalesce(count,0) as count, coalesce(hit_count,0) as hit_count from public.query_metrics where day = current_date"
+  metrics:
+    - count:     { usage: "GAUGE", description: "queries today" }
+    - hit_count: { usage: "GAUGE", description: "sequences served with >=1 hit today" }
+
+# A3M storage consumed on OSDF. Only status='active' rows have live objects, so
+# this is the figure that maps to real space (all 465k rows are active today and
+# none have a NULL size, but the filter keeps it honest if that changes).
+# Measured cost: ~90ms warm (parallel seq scan) at a 30s scrape = ~0.3% duty
+# cycle. If msa_cache_entries grows an order of magnitude, move this to a slower
+# scrape rather than dropping it.
+af3cache_a3m:
+  query: >
+    select source,
+           coalesce(sum(a3m_size_bytes), 0)::bigint as bytes,
+           count(*) as entries
+    from public.msa_cache_entries
+    where status = 'active'
+    group by 1
+  metrics:
+    - source:  { usage: "LABEL", description: "MSA source" }
+    - bytes:   { usage: "GAUGE", description: "bytes of a3m objects held on OSDF" }
+    - entries: { usage: "GAUGE", description: "active entries contributing to that total" }

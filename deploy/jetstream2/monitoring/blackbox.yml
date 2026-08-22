@@ -1,0 +1,24 @@
+modules:
+  # Strict validation. Use this once PUBLIC_HOST has a publicly-trusted cert;
+  # probe_ssl_earliest_cert_expiry then becomes a real expiry alert.
+  http_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      valid_status_codes: [200]
+      method: GET
+      preferred_ip_protocol: ip4
+
+  # For CADDY_TLS=tls internal. Caddy's local CA is not in any trust store, so
+  # validation MUST be skipped or every probe fails. Note Caddy's internal CA
+  # issues 12-HOUR leaf certs, so do not write a "expires in 30 days" alert
+  # against this module -- it would fire continuously.
+  http_2xx_insecure:
+    prober: http
+    timeout: 10s
+    http:
+      valid_status_codes: [200]
+      method: GET
+      preferred_ip_protocol: ip4
+      tls_config:
+        insecure_skip_verify: true

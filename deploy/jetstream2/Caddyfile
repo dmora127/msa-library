@@ -23,6 +23,34 @@
 		reverse_proxy pgweb:8081
 	}
 
+	# Grafana monitoring dashboards. Two gates on purpose: Caddy basic_auth as
+	# an outer gate, and Grafana's own login inside. GF_AUTH_PROXY is deliberately
+	# NOT used -- misconfigured header-trust auth is a real bypass, and the small
+	# friction of two logins is worth more than that risk on a public path.
+	#
+	# `handle` (not handle_path) keeps the /grafana prefix, which is what
+	# GF_SERVER_SERVE_FROM_SUB_PATH=true in .env.monitoring expects -- same
+	# arrangement as pgweb's --prefix above. Drop either and every asset 404s.
+	#
+	# NOTE: while CADDY_TLS=tls internal the browser cannot validate this cert,
+	# so the Grafana password is typed into an unauthenticated page. Use a
+	# password that is not reused anywhere else until the real cert lands.
+	@grafana path /grafana /grafana/*
+	handle @grafana {
+		basic_auth {
+			{$GRAFANA_PROXY_USER} {$GRAFANA_PROXY_HASH}
+		}
+		reverse_proxy grafana:3000 {
+			# CRITICAL: basic_auth does NOT consume the Authorization header, so
+			# without this Grafana receives the CADDY credentials, tries to log in
+			# with them, fails on every request, and trips its brute-force lockout
+			# ("too many consecutive incorrect login attempts") -- locking the real
+			# admin out. Strip it so Grafana sees a clean request and uses its own
+			# cookie session instead.
+			header_up -Authorization
+		}
+	}
+
 	# Everything else is the API.
 	#
 	# CORS is owned by the APP (app/main.py, CORSMiddleware), not by this file,

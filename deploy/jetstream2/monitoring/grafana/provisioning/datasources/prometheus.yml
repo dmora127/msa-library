@@ -1,0 +1,13 @@
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # Fixed uid so provisioned alert rules can reference it deterministically.
+    # Without this Grafana generates a random uid per install and the rules break.
+    uid: af3cache-prom
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s

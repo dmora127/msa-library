@@ -23,7 +23,11 @@ TEXTFILE_DIR="${TEXTFILE_DIR:-/var/lib/node_exporter/textfile}"
 
 # Source FIRST, then read. (Assigning HC_URL before this line silently left it
 # empty, so the dead-man's-switch ping never fired -- caught by `bash -x`.)
-[ -r "${HOME:-/home/exouser}/.af3cache-monitoring.env" ] && . "${HOME:-/home/exouser}/.af3cache-monitoring.env"
+# Ping URLs live beside the rest of the deploy config. Path is derived from
+# this script's own location, so a clone at a different prefix still works.
+_SD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MONITORING_ENV="${MONITORING_ENV:-$_SD/../.af3cache-monitoring.env}"
+[ -r "$MONITORING_ENV" ] && . "$MONITORING_ENV"
 HC_URL="${HC_VOLUME_URL:-}"          # healthchecks.io ping URL, optional
 
 ts() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }

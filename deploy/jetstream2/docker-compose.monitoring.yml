@@ -1,0 +1,140 @@
+# af3-cache — monitoring stack (phase 3 of the deployment, phase 2 of the
+# monitoring plan). Merge with the prod + api files:
+#
+#   docker compose -f docker-compose.prod.yml \
+#                  -f docker-compose.api.yml \
+#                  -f docker-compose.monitoring.yml up -d
+#
+# WARNING: once this file exists, a TWO-file `up -d --remove-orphans` will
+# silently DELETE this entire stack. Always pass all three -f arguments.
+#
+# Nothing here publishes a host port. Grafana is reached through Caddy at
+# /grafana (basic_auth) or an SSH tunnel; everything else is internal-only.
+# Same project name so these join the existing af3cache network and can reach
+# `api:8000` and `db:5432` by service name.
+name: af3cache
+
+# Applied to every service below (YAML anchors, not a Compose feature).
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "50m", max-file: "5" }
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    user: "65534:65534"          # nobody; prom_data is chowned by the volume
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 90d of history for OSG reporting; the size cap is the hard backstop so
+      # monitoring can never fill the disk it is supposed to be watching.
+      - --storage.tsdb.retention.time=90d
+      - --storage.tsdb.retention.size=8GB
+      - --web.enable-lifecycle     # POST /-/reload instead of restarting
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    expose: ["9090"]
+    mem_limit: 1500m
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    env_file: ./.env.monitoring    # admin password + SMTP relay creds
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Served under a sub-path behind Caddy -- same problem --prefix solves for
+      # pgweb. Both are required or every asset URL 404s.
+      # GF_SERVER_ROOT_URL is set in .env.monitoring: PUBLIC_HOST lives in
+      # .env.api, which Compose loads per-service via env_file, so its values
+      # are NOT available for ${} interpolation here.
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    expose: ["3000"]
+    mem_limit: 512m
+    logging: *logging
+    depends_on: [prometheus]
+
+  # Host CPU/RAM/disk. Read-only mounts; pid:host is required to read process
+  # and filesystem state. Also serves af3cache_pgdata_mounted, written to the
+  # textfile dir every 5 min by helpers/volume_guard.sh.
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.textfile.directory=/var/lib/node_exporter/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+      - /var/lib/node_exporter/textfile:/var/lib/node_exporter/textfile:ro
+    expose: ["9100"]
+    mem_limit: 192m
+    logging: *logging
+
+  # Per-container CPU/memory/OOM events. Running WITHOUT privileged:true
+  # deliberately -- verify the metrics we need are actually present before
+  # considering escalation. All mounts read-only.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    restart: unless-stopped
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=30s
+      - --store_container_labels=false
+      - --disable_metrics=percpu,sched,process,hugetlb,referenced_memory,cpu_topology,resctrl,tcp,udp,advtcp,memory_numa
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices: ["/dev/kmsg:/dev/kmsg"]
+    expose: ["8080"]
+    mem_limit: 384m
+    logging: *logging
+
+  # Connects as the read-only af3_exporter role (pg_monitor + SELECT on four
+  # tables, plus explicit RLS SELECT policies -- RLS is ON for those tables and
+  # without the policies the exporter silently reads ZERO rows).
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    env_file: ./.env.monitoring    # DATA_SOURCE_NAME
+    environment:
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/pg_exporter/queries.yaml
+    volumes:
+      - ./monitoring/postgres_queries.yaml:/etc/pg_exporter/queries.yaml:ro
+    expose: ["9187"]
+    mem_limit: 192m
+    logging: *logging
+    depends_on:
+      db: { condition: service_healthy }
+
+  # Probes the public edge the way an outside client would.
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    restart: unless-stopped
+    command: [--config.file=/etc/blackbox/blackbox.yml]
+    volumes:
+      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    expose: ["9115"]
+    mem_limit: 128m
+    logging: *logging
+
+volumes:
+  # On the ROOT disk deliberately, NOT /mnt/pgdata: monitoring must keep working
+  # (and alerting) precisely when that volume is missing.
+  prom_data:
+  grafana_data:

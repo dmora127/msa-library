@@ -21,5 +21,17 @@ build/
 tok.en
 *.jwt
 
+# msmtp relay credentials. Config now lives with the rest of the deploy config
+# in deploy/jetstream2/, but the filename does NOT match the .env* patterns
+# above, so it must be listed explicitly or the SMTP app password gets committed.
+.msmtprc
+*/.msmtprc
+**/.msmtprc
+
+# healthchecks.io dead-man's-switch ping URLs (anyone holding these can forge
+# "all is well" pings). Matches *.env* already; listed for clarity.
+.af3cache-monitoring.env
+**/.af3cache-monitoring.env
+
 # ...but the committed templates are not secrets
 !*.example

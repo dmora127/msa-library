@@ -1,0 +1,1794 @@
+{
+  "uid": "af3cache-overview",
+  "title": "af3-cache overview",
+  "tags": [
+    "af3cache"
+  ],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "editable": true,
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Is it up",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Public API",
+      "description": "Blackbox probe of /healthz every 2m -- the liveness signal.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "min(probe_success{job=\"blackbox-healthz\"})",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Postgres",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "min(pg_up)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Data volume",
+      "description": "From helpers/volume_guard.sh via the node-exporter textfile collector. 0 means Postgres may be on an empty root-disk cluster while /healthz still returns ok.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "min(af3cache_pgdata_mounted)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "NOT MOUNTED",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "MOUNTED",
+                  "color": "green",
+                  "index": 1
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Scrape targets up",
+      "description": "blackbox-stats is EXCLUDED: it scrapes every 20m, so its series is stale for most of that window and would make this flap between 5 and 6. Its health is covered by its own alert.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(up{job!=\"blackbox-stats\"})",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Cert expires in",
+      "description": "tls internal issues 12-HOUR certs, so ~9-12h here is NORMAL. Alert threshold is deliberately 1h.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "min(probe_ssl_earliest_cert_expiry{job=\"blackbox-healthz\"} - time())",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 3600
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "OOM kills (1h)",
+      "description": "Host has ZERO swap - OOM kills are abrupt.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(container_oom_events_total{name=~\"af3cache-.*\"}[1h]))",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Usage (OSG reporting)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Cache entries",
+      "description": "Baseline 2026-08-22: 465,433. A collapse here is the data-side signature of the volume boot race.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "max(af3cache_entries_total_count)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Queries today",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "max(af3cache_queries_count)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Hits today",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "max(af3cache_queries_hit_count)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Cache entries by source",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (source) (af3cache_entries_count{status=\"active\"})",
+          "legendFormat": "{{source}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Entries total (volume-loss canary)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "max(af3cache_entries_total_count)",
+          "legendFormat": "entries",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "A3M storage (50 TB capacity)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "A3M total",
+      "description": "Sum of a3m_size_bytes over status='active' entries -- the rows that have live objects on OSDF.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_a3m_bytes)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Capacity used",
+      "description": "Against 50 TB (decimal). If the quota is actually TiB, this reads ~10% high.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_a3m_bytes) / 50000000000000.0 * 100",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "orange",
+                "value": 85
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Headroom",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "50000000000000.0 - sum(af3cache_a3m_bytes)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5000000000000.0
+              },
+              {
+                "color": "green",
+                "value": 15000000000000.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Projected time to full",
+      "description": "Linear extrapolation of the last 7 days of growth. Needs about a week of history to mean anything; negative or absent means storage is flat or shrinking.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "(50000000000000.0 - sum(af3cache_a3m_bytes)) / deriv(sum(af3cache_a3m_bytes)[7d:1h])",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5184000
+              },
+              {
+                "color": "green",
+                "value": 15552000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Mean A3M size",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_a3m_bytes) / sum(af3cache_a3m_entries)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Growth / day",
+      "description": "Bytes added per day, from the same 7d linear fit.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 15
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "deriv(sum(af3cache_a3m_bytes)[7d:1h]) * 86400",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "A3M bytes by source",
+      "description": "Stacked, so the top of the stack is total consumption.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 19
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "af3cache_a3m_bytes",
+          "legendFormat": "{{source}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Capacity used (%)",
+      "description": "Watch the slope, not the value -- at 5.9% the slope is what tells you when to ask for more quota.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_a3m_bytes) / 50000000000000.0 * 100",
+          "legendFormat": "used",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 23,
+      "type": "row",
+      "title": "Correctness",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "panels": []
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Ingestions by status",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (status) (af3cache_ingestions_count)",
+          "legendFormat": "{{status}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Probe latency (/healthz 2m, /v1/stats 20m)",
+      "description": "/v1/stats is ~50x more expensive than /healthz (8 scalar subqueries over a 465k-row table), which is why it is probed at 20m. Its line is sparse by design.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "probe_duration_seconds{job=~\"blackbox-.*\"}",
+          "legendFormat": "{{instance}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Reaper exposure - INFORMATIONAL ONLY (job is NOT scheduled)",
+      "description": "Entries past their source's idle_ttl_days that the reaper WOULD delete if enabled. It is deliberately NOT scheduled: on this instance reap() issues real `pelican object rm`. Read-only count.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (source) (af3cache_reap_exposure_would_go_stale)",
+          "legendFormat": "{{source}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 27,
+      "type": "row",
+      "title": "Capacity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "panels": []
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Disk free by filesystem",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"}",
+          "legendFormat": "{{mountpoint}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Host memory available",
+      "description": "Zero swap on this host, so this is the OOM precursor.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "node_memory_MemAvailable_bytes",
+          "legendFormat": "available",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Container memory (working set)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "container_memory_working_set_bytes{name=~\"af3cache-.*\"}",
+          "legendFormat": "{{name}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Container CPU",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "rate(container_cpu_usage_seconds_total{name=~\"af3cache-.*\"}[5m])",
+          "legendFormat": "{{name}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

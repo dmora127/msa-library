@@ -35,7 +35,11 @@ LOCK_FILE="${LOCK_FILE:-/tmp/af3cache-backup.lock}"
 log() { printf '%s [backup] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 # Dead-man's switch -- see backup.sh for the rationale.
-[ -r "${HOME:-/home/exouser}/.af3cache-monitoring.env" ] && . "${HOME:-/home/exouser}/.af3cache-monitoring.env"
+# Ping URLs live beside the rest of the deploy config. Path is derived from
+# this script's own location, so a clone at a different prefix still works.
+_SD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MONITORING_ENV="${MONITORING_ENV:-$_SD/../.af3cache-monitoring.env}"
+[ -r "$MONITORING_ENV" ] && . "$MONITORING_ENV"
 HC="${HC_BACKUP_WEEKLY_URL:-}"
 hc() { [ -n "$HC" ] && curl -fsS -m 10 --retry 3 "${HC}${1:-}" >/dev/null 2>&1; return 0; }
 

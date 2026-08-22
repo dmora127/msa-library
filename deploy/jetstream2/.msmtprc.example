@@ -1,0 +1,44 @@
+# msmtp — send-only SMTP relay so cron's MAILTO actually delivers.
+#
+# Install (one-time, on the VM):
+#   cp .msmtprc.example .msmtprc && chmod 600 .msmtprc     # then fill in below
+#   ln -sfn /opt/af3-cache/deploy/jetstream2/.msmtprc ~/.msmtprc
+#
+# The SYMLINK IS REQUIRED. msmtp only ever reads ~/.msmtprc or /etc/msmtprc
+# (`msmtp --version` lists both). When cron's MAILTO delivers, it execs
+# /usr/sbin/sendmail with no way to pass -C, so the home path must resolve.
+# /etc/msmtprc is the wrong answer here: it would have to be world-readable for
+# cron-as-exouser to read it, leaking this password to every local account.
+# Keep the real file mode 600 -- msmtp refuses a group/world-readable config.
+#
+# Packages:  sudo apt-get install -y msmtp msmtp-mta
+# (msmtp-mta diverts /usr/sbin/sendmail, which is what cron actually calls.)
+#
+# Do NOT unmask postfix instead: the Exosphere image masks it deliberately, and
+# direct :25 delivery from a floating IP with no PTR/SPF is silently discarded
+# by Microsoft 365 (which is what wisc.edu runs) -- i.e. a second silent-failure
+# channel reporting on the first.
+#
+# Use a DEDICATED throwaway account with an App Password, never a personal or
+# NetID credential. This secret sits on an internet-facing VM; it must be one
+# you are willing to burn. An App Password can only send mail.
+#   https://myaccount.google.com/apppasswords   (needs 2FA on that account)
+#
+# Verify end-to-end -- an unverified alert path equals no alert path:
+#   printf 'To: you@example.edu\nSubject: test\n\nbody\n' | /usr/sbin/sendmail -t
+#   tail /home/exouser/logs/msmtp.log
+# Then force a real failure and confirm the mail arrives:
+#   MIN_DUMP_BYTES=999999999999 helpers/backup.sh
+
+defaults
+auth            on
+tls             on
+tls_trust_file  /etc/ssl/certs/ca-certificates.crt
+logfile         /home/exouser/logs/msmtp.log
+
+account         default
+host            smtp.gmail.com
+port            587
+from            CHANGE_ME@gmail.com
+user            CHANGE_ME@gmail.com
+password        CHANGE_ME_16_CHAR_APP_PASSWORD

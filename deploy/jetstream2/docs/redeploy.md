@@ -320,6 +320,10 @@ MAILTO=you@example.edu
 # Data-volume mount guard (see Phase 2 warning). Publishes af3cache_pgdata_mounted.
 */5 * * * *  /opt/af3-cache/deploy/jetstream2/helpers/volume_guard.sh
 
+# Monitoring dead-man's switch (Phase 10). Checks Prometheus is scraping FRESH
+# data and Grafana is actually EVALUATING rules -- not just that both are alive.
+*/5 * * * *  /opt/af3-cache/deploy/jetstream2/helpers/monitoring_watchdog.sh
+
 # 30 * * * *   /opt/af3-cache/deploy/jetstream2/helpers/reclassify.sh >> /mnt/pgdata/backups/reclassify.log 2>&1   # diamond only
 ```
 
@@ -331,14 +335,136 @@ MAILTO=you@example.edu
 > would begin permanently deleting community-contributed `.a3m` objects. It needs
 > an explicit retention decision and a `dry_run` mode first.
 
-`MAILTO` only works if a mail transport is installed — `postfix` is masked on the
-Exosphere base image, so cron mail is silently discarded until you install
-`msmtp` + `msmtp-mta` and configure a relay. **Verify with a deliberate failure**;
-an unverified alert path is the same as no alert path.
+### Dead-man's switches (healthchecks.io)
+
+Every other alert works by *sending* something, which cannot cover the case where
+the sender itself is broken: a deleted cron line, a moved script, a powered-off
+VM, or a wedged Prometheus all produce **silence**, which is indistinguishable
+from "all is well". Four free healthchecks.io checks invert that — they alert when
+pings *stop*:
+
+| Check | Period / grace | Pinged by |
+|---|---|---|
+| `af3cache-backup-daily` | 1d / 4h | `helpers/backup.sh` |
+| `af3cache-backup-weekly` | 7d / 12h | `helpers/af3cache_backup.sh` |
+| `af3cache-volume-guard` | 10m / 20m | `helpers/volume_guard.sh` |
+| `af3cache-monitoring-watchdog` | 10m / 20m | `helpers/monitoring_watchdog.sh` |
+
+Ping URLs go in `deploy/jetstream2/.af3cache-monitoring.env` (from
+`.af3cache-monitoring.env.example`, mode 600, gitignored) as
+`HC_BACKUP_DAILY_URL`, `HC_BACKUP_WEEKLY_URL`, `HC_VOLUME_URL`,
+`HC_WATCHDOG_URL`. The helper scripts locate it relative to their own directory,
+so a clone at a different prefix works unchanged. Scripts skip the ping silently
+when a URL is unset — which is exactly why the trap below matters.
+
+> **Ordering trap, learned the hard way.** Source the env file **before** reading
+> the variable out of it. Getting this backwards leaves the ping URL empty, and
+> the script still exits 0 with a correct-looking log — the dead-man's switch just
+> quietly does nothing, which you would only discover during a real outage.
+> Verify with `bash -x <script>` and confirm a `curl` to hc-ping.com actually
+> appears; do not trust the exit code.
+
+### Mail transport
+
+`MAILTO` only works if a mail transport is installed — `postfix` is **masked** on
+the Exosphere base image, so cron mail is silently discarded until you set this
+up. On one instance a failed-backup notification sat in the masked MTA's queue
+for two months.
+
+```bash
+sudo apt-get install -y msmtp msmtp-mta      # msmtp-mta diverts /usr/sbin/sendmail
+cp .msmtprc.example .msmtprc && chmod 600 .msmtprc   # fill in the relay creds
+ln -sfn /opt/af3-cache/deploy/jetstream2/.msmtprc ~/.msmtprc
+```
+
+> **The symlink is required, not cosmetic.** msmtp reads only `~/.msmtprc` or
+> `/etc/msmtprc` (`msmtp --version` lists both). When cron's `MAILTO` delivers it
+> execs `/usr/sbin/sendmail` with no opportunity to pass `-C`, so the home path
+> must resolve. `/etc/msmtprc` is the wrong fix: it would need to be
+> world-readable for cron-as-`exouser`, leaking the relay password to every local
+> account. Keep the real file mode `600` — msmtp refuses a group/world-readable
+> config.
+
+Use a dedicated throwaway account with an app password, never a personal or
+NetID credential. **Verify with a deliberate failure** — an unverified alert path
+is the same as no alert path:
+
+```bash
+MIN_DUMP_BYTES=999999999999 helpers/backup.sh   # must produce an email
+```
 
 On-volume dumps only protect against logical errors — also take Exosphere volume
 snapshots and copy dumps off-VM. The weekly job above writes to `/dev/sdb`
 specifically so the two copies do not share a device.
+
+---
+
+## Phase 10 — Monitoring stack
+
+Six containers: `prometheus`, `grafana`, `node-exporter`, `cadvisor`,
+`postgres-exporter`, `blackbox-exporter`. All are `expose:`-only; Grafana is
+reached through Caddy at `/grafana` behind `basic_auth`.
+
+> **The compose invocation now takes THREE `-f` files.** A two-file
+> `up -d --remove-orphans` will **silently delete the entire monitoring stack**,
+> because those services are not in the merged config it computes.
+
+```bash
+cd /opt/af3-cache/deploy/jetstream2
+docker compose -f docker-compose.prod.yml \
+               -f docker-compose.api.yml \
+               -f docker-compose.monitoring.yml up -d
+```
+
+Setup, once per instance:
+
+1. `cp .env.monitoring.example .env.monitoring && chmod 600 .env.monitoring`,
+   then fill in every `CHANGE_ME`.
+2. Create the read-only exporter role. **Two traps here:**
+   - Role names starting with `pg_` are **reserved** by Postgres — use `af3_exporter`.
+   - RLS is enabled on `msa_cache_entries`, `msa_ingestions`, `msa_sources` and
+     `query_metrics`, and the existing policies only target the `anon` role. The
+     app's `af3` role is superuser with `BYPASSRLS` so it never noticed. A plain
+     `GRANT SELECT` is **not enough** — the exporter reads **zero rows**, which
+     makes `af3cache_entries_total` report 0, i.e. exactly the signature of the
+     empty-cluster boot race it exists to detect. Add an explicit SELECT policy
+     per table (preferred over granting `BYPASSRLS`).
+   ```sql
+   CREATE ROLE af3_exporter LOGIN PASSWORD '<openssl rand -hex 24>';
+   GRANT pg_monitor TO af3_exporter;
+   GRANT CONNECT ON DATABASE af3cache TO af3_exporter;
+   GRANT USAGE ON SCHEMA public TO af3_exporter;
+   GRANT SELECT ON public.msa_cache_entries, public.msa_ingestions,
+                   public.msa_sources, public.query_metrics TO af3_exporter;
+   CREATE POLICY exporter_read_cache_entries ON public.msa_cache_entries
+     FOR SELECT TO af3_exporter USING (true);
+   -- ...repeat for msa_ingestions, msa_sources, query_metrics
+   ```
+3. Add `GRAFANA_PROXY_USER` / `GRAFANA_PROXY_HASH` to `.env.api`
+   (`docker run --rm caddy:2 caddy hash-password --plaintext '<pw>'`), then
+   **recreate Caddy** — see the warning below.
+
+> **Caddy `basic_auth` does NOT strip the `Authorization` header.** Without
+> `header_up -Authorization` in the `/grafana` reverse_proxy block, Grafana
+> receives the *Caddy* credentials, fails to log in on every single request, and
+> trips its brute-force lockout — locking the real admin out with
+> *"too many consecutive incorrect login attempts"*. The login page still
+> renders, so this looks like it works until you try to sign in.
+
+> **Caddyfile changes need a RECREATE, not a reload.** It is a single-file bind
+> mount and the running container holds a stale inode, so `caddy reload` re-reads
+> the old file:
+> `docker compose -f ... -f ... -f ... up -d --force-recreate caddy` (~4s downtime).
+
+Alert thresholds worth knowing: while `CADDY_TLS=tls internal`, Caddy's internal
+CA issues **12-hour** leaf certificates, so the cert-expiry alert is set to
+**1 hour**, not the usual 30 days — a 30-day rule would fire on every evaluation.
+After the real-cert cutover, raise it to 21 days and switch the blackbox module
+from `http_2xx_insecure` to `http_2xx`.
+
+The `af3cache_reap_exposure` metric is **read-only**. It counts what the
+maintenance/reap job *would* delete. That job is deliberately not scheduled — see
+the Phase 9 warning.
 
 ---
 

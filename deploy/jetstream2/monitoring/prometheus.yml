@@ -1,0 +1,77 @@
+# af3-cache Prometheus. Scrapes only over the internal compose network -- no
+# target is reached through Caddy, and nothing here publishes a host port.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    instance: af3cache-prod
+
+# NOTE: no rule_files here on purpose. There is no Alertmanager in this stack,
+# so Prometheus-side alert rules would evaluate and then go nowhere. All
+# alerting is defined in Grafana unified alerting, next to the dashboards that
+# visualise the same expressions.
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs: [{ targets: ["localhost:9090"] }]
+
+  # Host CPU/RAM/disk. ALSO picks up af3cache_pgdata_mounted from the textfile
+  # collector, which helpers/volume_guard.sh writes every 5 min from cron.
+  - job_name: node
+    static_configs: [{ targets: ["node-exporter:9100"] }]
+
+  - job_name: cadvisor
+    static_configs: [{ targets: ["cadvisor:8080"] }]
+
+  # Connections, locks, DB size + the custom row-count queries in
+  # postgres_queries.yaml. Runs as the read-only af3_exporter role.
+  - job_name: postgres
+    static_configs: [{ targets: ["postgres-exporter:9187"] }]
+
+  # Public edge, as an outside client sees it. Split into two jobs because the
+  # endpoints cost wildly different amounts: /healthz is a `select 1` (~10ms),
+  # while /v1/stats is 8 scalar subqueries over a 465k-row table (~490ms).
+  # Probing /v1/stats every 30s meant ~2,880 expensive queries a day for no
+  # extra signal.
+  #
+  # Both use the _insecure module because CADDY_TLS=tls internal means the cert
+  # is signed by Caddy's local CA. Switch both to http_2xx after the real-cert
+  # cutover and the probes double as certificate validation.
+
+  # Liveness -- THE public-API-up signal, so keep it frequent. 2m is well inside
+  # Prometheus's 5m query.lookback-delta, so this series never goes stale and
+  # instant queries against it always resolve.
+  - job_name: blackbox-healthz
+    scrape_interval: 2m
+    metrics_path: /probe
+    params:
+      module: [http_2xx_insecure]
+    static_configs:
+      - targets:
+          - https://<api-host-ip>.sslip.io/healthz
+    relabel_configs:
+      - { source_labels: [__address__], target_label: __param_target }
+      - { source_labels: [__param_target], target_label: instance }
+      - { target_label: __address__, replacement: blackbox-exporter:9115 }
+
+  # Expensive endpoint, low frequency.
+  #
+  # IMPORTANT: 20m is far longer than the 5m default query.lookback-delta, so
+  # this series is STALE for 15 of every 20 minutes -- an instant query like
+  # probe_success{job="blackbox-stats"} returns NOTHING most of the time. Any
+  # panel or alert touching it must wrap it in last_over_time(...[25m]).
+  # Do NOT "fix" this by raising lookback-delta globally: that would mask
+  # genuinely dead targets everywhere else in this config.
+  - job_name: blackbox-stats
+    scrape_interval: 20m
+    metrics_path: /probe
+    params:
+      module: [http_2xx_insecure]
+    static_configs:
+      - targets:
+          - https://<api-host-ip>.sslip.io/v1/stats
+    relabel_configs:
+      - { source_labels: [__address__], target_label: __param_target }
+      - { source_labels: [__param_target], target_label: instance }
+      - { target_label: __address__, replacement: blackbox-exporter:9115 }
