@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.core.metrics import record_app_error
+
 
 class AppError(Exception):
     status_code = 500
@@ -58,6 +60,10 @@ class AlreadyCached(AppError):
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handle(_: Request, exc: AppError) -> JSONResponse:
+        # Until now these were counted and logged NOWHERE: a storm of 503
+        # osdf_unavailable or token_issuance_failed was completely invisible,
+        # visible only as a status code in uvicorn's access log.
+        record_app_error(exc.code)
         body = {"code": exc.code, "message": exc.message}
         if exc.extra:
             body.update(exc.extra)

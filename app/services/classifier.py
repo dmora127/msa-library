@@ -25,9 +25,11 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.core.metrics import record_classify
 
 log = logging.getLogger("af3cache.classifier")
 
@@ -97,7 +99,13 @@ class DiamondClassifier(Classifier):
         self.evalue_threshold = evalue_threshold
 
     async def classify(self, sequence: str) -> Classification:
+        # EVERY failure path here returns UNCLASSIFIED and none of them raise, so
+        # a completely broken diamond is invisible over HTTP -- uploads just
+        # silently stop being classified. These counters are what separate "no
+        # hit" (a real answer) from "binary missing / timed out / crashed".
+        _t0 = time.monotonic()
         if not sequence:
+            record_classify("empty_input")
             return UNCLASSIFIED
         fasta = f">query\n{sequence}\n".encode()
         argv = [
@@ -119,6 +127,7 @@ class DiamondClassifier(Classifier):
                 stderr=asyncio.subprocess.PIPE,
             )
         except FileNotFoundError:
+            record_classify("binary_missing", time.monotonic() - _t0)
             log.warning("classify: diamond binary not found: %s", self.binary)
             return UNCLASSIFIED
         try:
@@ -128,6 +137,7 @@ class DiamondClassifier(Classifier):
         except TimeoutError:
             proc.kill()
             await proc.wait()
+            record_classify("timeout", time.monotonic() - _t0)
             log.warning("classify: diamond timed out after %ss", self.timeout)
             return UNCLASSIFIED
         if proc.returncode != 0:
@@ -136,8 +146,18 @@ class DiamondClassifier(Classifier):
                 proc.returncode,
                 err.decode(errors="replace").strip()[:200],
             )
+            record_classify("nonzero_exit", time.monotonic() - _t0)
             return UNCLASSIFIED
-        return self._parse(out.decode(errors="replace"))
+        result = self._parse(out.decode(errors="replace"))
+        # diamond ran fine; "unclassified" here is a genuine no-hit, NOT a fault.
+        # Compare by VALUE, not identity: _parse returns the UNCLASSIFIED constant
+        # today, but a diamond row whose sscinames is literally "Unclassified"
+        # would build an equal-but-distinct object that `is` would call a hit.
+        record_classify(
+            "unclassified" if result == UNCLASSIFIED else "hit",
+            time.monotonic() - _t0,
+        )
+        return result
 
     def _parse(self, output: str) -> Classification:
         # Any row reaching here already passed diamond's --id + --query-cover

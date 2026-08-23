@@ -6,7 +6,7 @@ msa_sources.enabled and is managed via the /v1/admin/sources endpoints.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AdminConfig(BaseModel):
@@ -53,7 +53,28 @@ class SourceInfo(BaseModel):
 
 
 class SourceUpdate(BaseModel):
-    enabled: bool
+    """Partial update for a source row.
+
+    extra="forbid" is deliberate. This model previously accepted only `enabled`
+    and Pydantic silently DISCARDED everything else, so a request carrying
+    idle_ttl_days got HTTP 200 and a response echoing the UNCHANGED value --
+    indistinguishable from success. Unknown fields now fail loudly with a 422.
+
+    Every field is optional and only those actually PRESENT in the request body
+    are written (see model_fields_set in the route). That matters for
+    idle_ttl_days, where null is a meaningful value ("never cull", which is what
+    the other seven sources use) and must be distinguishable from "not supplied".
+
+    `name` is accepted only for convenience so a GET response can be edited and
+    PUT straight back; it must match the path, and it is never used to rename.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    enabled: bool | None = None
+    idle_ttl_days: int | None = Field(default=None, gt=0)
+    notes: str | None = None
 
 
 class AdminIngestRequest(BaseModel):

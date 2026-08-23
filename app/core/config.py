@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     oauth2_audience: str | None = None
     oauth2_scope_template: str = "storage.create:/{path} storage.modify:/{path}"
 
+    # Prometheus /metrics. Blocked at the edge (the Caddyfile 404s /metrics and
+    # /readyz); Prometheus scrapes api:8000 directly over the compose network.
+    # Setting this false removes the middleware from the stack entirely and
+    # unmounts the endpoint -- an instant kill switch that needs only a restart,
+    # not a rebuild.
+    metrics_enabled: bool = True
+
     app_name: str = Field(default="af3-cache", exclude=True)
 
     @property

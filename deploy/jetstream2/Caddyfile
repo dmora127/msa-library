@@ -51,6 +51,21 @@
 		}
 	}
 
+	# Internal-only endpoints. Prometheus scrapes api:8000 directly on the compose
+	# network, so these never need to traverse the edge. Responds 404 rather than
+	# 403 so their existence is not advertised.
+	#
+	# /metrics exposes route names, error-code distribution, upload volumes and DB
+	# pool sizing -- not credentials, but useful reconnaissance. /readyz arrives in
+	# phase 4 and is listed now so both land in a single Caddy recreate.
+	#
+	# NOTE: without this block the catch-all below would proxy them straight to
+	# api:8000, i.e. world-readable the moment the endpoint exists.
+	@internal path /metrics /metrics/* /readyz
+	handle @internal {
+		respond 404
+	}
+
 	# Everything else is the API.
 	#
 	# CORS is owned by the APP (app/main.py, CORSMiddleware), not by this file,

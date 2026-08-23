@@ -13,6 +13,7 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
+from app.core.metrics import record_query
 from app.schemas.query import QueryHit, QueryRequest, QueryResponse, QuerySeqResult
 from app.services.deps import get_sequence_service
 from app.services.sequence_service import SequenceService
@@ -79,6 +80,9 @@ async def query(
     # failure here (table missing, lock timeout, etc.) doesn't invalidate the
     # outer read transaction and 500 the query.
     hits_served = sum(1 for h in order if grouped[h])
+    # Real-time counterpart to the query_metrics table below. Same numbers, no
+    # DB write -- which is what makes a cache hit ratio cheap to graph.
+    record_query(len(order), hits_served)
     try:
         async with svc.session.begin_nested():
             await svc.session.execute(

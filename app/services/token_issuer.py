@@ -36,6 +36,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from app.core.config import Settings
 from app.core.errors import TokenIssuanceError
+from app.core.metrics import record_token_issue
 
 log = logging.getLogger("af3cache.tokens")
 
@@ -169,9 +170,15 @@ class PelicanCliTokenIssuer(TokenIssuer):
     async def issue(
         self, *, subject: str, object_uri: str, ttl_seconds: int
     ) -> IssuedToken:
+        # `pelican token create` has no timeout and no retry. If this stops
+        # succeeding no OSPool job can upload anything, while /healthz keeps
+        # reporting ok -- so every exit path below is counted by outcome.
+        _t0 = time.monotonic()
         if not self.issuer:
+            record_token_issue("not_configured")
             raise TokenIssuanceError("PELICAN_TOKEN_ISSUER is not configured")
         if not self.private_key:
+            record_token_issue("not_configured")
             raise TokenIssuanceError("PELICAN_TOKEN_PRIVATE_KEY is not configured")
 
         argv = _pelican_argv(
@@ -188,6 +195,7 @@ class PelicanCliTokenIssuer(TokenIssuer):
                     *argv, stdout=out_fh, stderr=asyncio.subprocess.PIPE,
                 )
             except FileNotFoundError as e:
+                record_token_issue("cli_missing", time.monotonic() - _t0)
                 raise TokenIssuanceError(
                     f"pelican CLI not found: {self.binary}"
                 ) from e
@@ -195,6 +203,7 @@ class PelicanCliTokenIssuer(TokenIssuer):
                 out_fh.close()  # child inherited its own fd; close the parent's
             _, err = await proc.communicate()
             if proc.returncode != 0:
+                record_token_issue("nonzero_exit", time.monotonic() - _t0)
                 raise TokenIssuanceError(
                     f"pelican token create exit {proc.returncode}: "
                     f"{err.decode(errors='replace').strip()[:200]}"
@@ -205,7 +214,10 @@ class PelicanCliTokenIssuer(TokenIssuer):
                 os.unlink(out_path)
 
         if not token:
+            record_token_issue("empty_output", time.monotonic() - _t0)
             raise TokenIssuanceError("pelican token create produced no token")
+
+        record_token_issue("ok", time.monotonic() - _t0)
 
         ref = uuid.uuid4().hex
         claims = _decode_unverified(token)

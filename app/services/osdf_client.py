@@ -20,6 +20,11 @@ import uuid
 from dataclasses import dataclass
 
 from app.core.errors import OsdfUnavailable
+from app.core.metrics import (
+    OSDF_INFLIGHT,
+    OSDF_WAITING,
+    record_osdf_fetch,
+)
 
 log = logging.getLogger("af3cache.osdf")
 
@@ -87,16 +92,26 @@ class PelicanCliOsdfClient(OsdfClient):
     async def fetch(self, osdf_uri: str, *, max_bytes: int) -> FetchedObject:
         # Wait for a slot. Time only the WAIT, not the fetch — a slow origin
         # shouldn't get killed mid-download once it's already running.
+        # The gauges bracket the semaphore, not the fetch, so "waiting" means
+        # genuinely queued and "inflight" means genuinely running. inflight
+        # pinned at `concurrency` with a flat fetch rate is the signature of a
+        # hung `pelican object get` -- see the note in app/core/metrics.py.
+        OSDF_WAITING.inc()
         try:
             async with asyncio.timeout(self._queue_timeout):
                 await self._sem.acquire()
         except TimeoutError as e:
+            record_osdf_fetch("queue_timeout")
             raise OsdfUnavailable(
                 "verify queue full (retryable; ingestion stays 'uploaded')"
             ) from e
+        finally:
+            OSDF_WAITING.dec()
+        OSDF_INFLIGHT.inc()
         try:
             return await self._do_fetch(osdf_uri, max_bytes=max_bytes)
         finally:
+            OSDF_INFLIGHT.dec()
             self._sem.release()
 
     async def _do_fetch(
@@ -110,6 +125,7 @@ class PelicanCliOsdfClient(OsdfClient):
         out_path = os.path.join("/tmp", f"osdf-verify-{uuid.uuid4().hex}.a3m")
         data = b""
         rc: int | str = "?"
+        outcome = "ok"
         start = time.monotonic()
         try:
             try:
@@ -119,6 +135,7 @@ class PelicanCliOsdfClient(OsdfClient):
                     stderr=asyncio.subprocess.PIPE,
                 )
             except FileNotFoundError as e:
+                outcome = "cli_missing"
                 raise OsdfUnavailable(
                     f"pelican CLI not found: {self.binary}"
                 ) from e
@@ -133,6 +150,7 @@ class PelicanCliOsdfClient(OsdfClient):
                 raise
             rc = proc.returncode
             if rc != 0:
+                outcome = "error"
                 raise OsdfUnavailable(
                     f"pelican get exit {rc}: "
                     f"{err.decode(errors='replace').strip()[:200]}"
@@ -140,18 +158,23 @@ class PelicanCliOsdfClient(OsdfClient):
             try:
                 size = await asyncio.to_thread(os.path.getsize, out_path)
             except OSError as e:
+                outcome = "error"
                 raise OsdfUnavailable(f"pelican get wrote no file: {e}") from e
             # pelican has already written the whole object to /tmp; the declared
             # -size check at upload-request is the primary size gate.
             if size > max_bytes:
+                outcome = "too_large"
                 raise ObjectTooLarge(f"{size} > {max_bytes} bytes")
             data = await asyncio.to_thread(_read_bytes, out_path)
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(out_path)
+            elapsed = time.monotonic() - start
+            # `outcome` is set by each failure path above; reaching here with it
+            # unset means the happy path completed.
+            record_osdf_fetch(outcome, elapsed)
             log.info(
-                "osdf fetch %s took %.2fs rc=%s", osdf_uri,
-                time.monotonic() - start, rc,
+                "osdf fetch %s took %.2fs rc=%s", osdf_uri, elapsed, rc,
             )
         return FetchedObject(data=data, size=len(data))
 

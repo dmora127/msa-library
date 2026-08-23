@@ -82,6 +82,35 @@ class SettingsService:
         )
         return res.rowcount > 0
 
+    async def update_source(self, name: str, fields: dict) -> bool:
+        """Update only the columns present in `fields`. False if unknown source.
+
+        `fields` carries exactly the keys the client SUPPLIED, so a caller can
+        set idle_ttl_days to NULL ("never cull") and have that distinguished
+        from omitting it. Column names are validated against an allowlist rather
+        than interpolated from caller input -- these go into a SQL string, so an
+        allowlist is the difference between a parameterised update and an
+        injection point.
+        """
+        allowed = {"enabled", "idle_ttl_days", "notes"}
+        cols = [k for k in fields if k in allowed]
+        if not cols:
+            # Nothing to change; still report whether the source exists so the
+            # route can 404 correctly rather than silently succeeding.
+            res = await self.session.execute(
+                text("select 1 from public.msa_sources where name = :n"),
+                {"n": name},
+            )
+            return res.first() is not None
+        assignments = ", ".join(f"{c} = :{c}" for c in cols)
+        params = {c: fields[c] for c in cols}
+        params["n"] = name
+        res = await self.session.execute(
+            text(f"update public.msa_sources set {assignments} where name = :n"),
+            params,
+        )
+        return res.rowcount > 0
+
     async def source_enabled(self, name: str) -> bool | None:
         """True/False, or None if the source does not exist."""
         return (

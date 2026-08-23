@@ -1305,7 +1305,7 @@
     {
       "id": 23,
       "type": "row",
-      "title": "Correctness",
+      "title": "Application",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1317,6 +1317,735 @@
     },
     {
       "id": 24,
+      "type": "stat",
+      "title": "Cache hit ratio (all time)",
+      "description": "The headline number. hits/sequences, both counted per SEQUENCE. Note the query_metrics table cannot produce this: its `count` is per-REQUEST while `hit_count` is per-sequence, so the two columns are different units.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "af3cache_query_hits_total / af3cache_query_sequences_total * 100",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 25
+              },
+              {
+                "color": "green",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Sequences queried",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "af3cache_query_sequences_total",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "5xx rate (24h)",
+      "description": "`or vector(0)` matters: with no 5xx at all the numerator has no series and the panel would read 'No data', which is ambiguous on an error-rate tile -- you cannot tell 0% from broken. clamp_min avoids divide-by-zero on a quiet day.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "(sum(increase(af3cache_http_requests_total{status=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(increase(af3cache_http_requests_total[24h])), 1) * 100",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "OSDF verify in-flight",
+      "description": "Compare with verify_concurrency (4). Pinned at 4 with a flat fetch rate is the signature of a hung `pelican object get` -- the timeout covers only the queue wait, not the fetch.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "af3cache_osdf_verify_inflight",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 4
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "DB pool checked out",
+      "description": "Saturation is 60 (pool_size 20 + max_overflow 40).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "af3cache_db_pool_checked_out",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 45
+              },
+              {
+                "color": "red",
+                "value": 58
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Token issue failures",
+      "description": "`pelican token create` has no timeout and no retry. If this climbs, no OSPool job can upload -- while /healthz stays green.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 28
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_token_issue_total{result!=\"ok\"})",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Request rate by route (24h window)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (route) (increase(af3cache_http_requests_total[24h]))",
+          "legendFormat": "{{route}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "p95 latency by route",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(af3cache_http_request_duration_seconds_bucket[24h])))",
+          "legendFormat": "{{route}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Application errors by code",
+      "description": "AppError.code. 4xx codes (already_cached, upload_too_large) are client behaviour, not incidents; osdf_unavailable and token_issuance_failed are.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 39
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (code) (increase(af3cache_app_errors_total[24h]))",
+          "legendFormat": "{{code}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Classifier outcomes",
+      "description": "'unclassified' is a real no-hit. binary_missing / timeout / nonzero_exit mean diamond is broken -- previously invisible, since every failure path silently returns UNCLASSIFIED.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 39
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (result) (increase(af3cache_classify_total[24h]))",
+          "legendFormat": "{{result}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "OSDF fetch outcomes",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 39
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (result) (increase(af3cache_osdf_fetch_total[24h]))",
+          "legendFormat": "{{result}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 35,
+      "type": "row",
+      "title": "Correctness",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "panels": []
+    },
+    {
+      "id": 36,
       "type": "timeseries",
       "title": "Ingestions by status",
       "description": "",
@@ -1328,7 +2057,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 28
+        "y": 47
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -1382,7 +2111,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 37,
       "type": "timeseries",
       "title": "Probe latency (/healthz 2m, /v1/stats 20m)",
       "description": "/v1/stats is ~50x more expensive than /healthz (8 scalar subqueries over a 465k-row table), which is why it is probed at 20m. Its line is sparse by design.",
@@ -1394,7 +2123,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 28
+        "y": 47
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -1448,7 +2177,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 38,
       "type": "timeseries",
       "title": "Reaper exposure - INFORMATIONAL ONLY (job is NOT scheduled)",
       "description": "Entries past their source's idle_ttl_days that the reaper WOULD delete if enabled. It is deliberately NOT scheduled: on this instance reap() issues real `pelican object rm`. Read-only count.",
@@ -1460,7 +2189,7 @@
         "h": 5,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 54
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -1514,7 +2243,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 39,
       "type": "row",
       "title": "Capacity",
       "collapsed": false,
@@ -1522,12 +2251,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 59
       },
       "panels": []
     },
     {
-      "id": 28,
+      "id": 40,
       "type": "timeseries",
       "title": "Disk free by filesystem",
       "description": "",
@@ -1539,7 +2268,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 41
+        "y": 60
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -1593,7 +2322,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 41,
       "type": "timeseries",
       "title": "Host memory available",
       "description": "Zero swap on this host, so this is the OOM precursor.",
@@ -1605,7 +2334,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 41
+        "y": 60
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -1659,7 +2388,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 42,
       "type": "timeseries",
       "title": "Container memory (working set)",
       "description": "",
@@ -1671,7 +2400,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 48
+        "y": 67
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -1725,7 +2454,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 43,
       "type": "timeseries",
       "title": "Container CPU",
       "description": "",
@@ -1737,7 +2466,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 48
+        "y": 67
       },
       "maxDataPoints": 1000,
       "targets": [

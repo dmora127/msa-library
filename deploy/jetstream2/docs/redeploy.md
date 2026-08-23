@@ -462,6 +462,63 @@ CA issues **12-hour** leaf certificates, so the cert-expiry alert is set to
 After the real-cert cutover, raise it to 21 days and switch the blackbox module
 from `http_2xx_insecure` to `http_2xx`.
 
+### Application metrics (`/metrics`)
+
+The app exposes Prometheus metrics at `/metrics`, scraped directly at
+`api:8000` over the compose network. **The Caddyfile 404s `/metrics` and
+`/readyz` at the edge** — without that block the catch-all would proxy them
+straight through, i.e. world-readable the moment the endpoint exists.
+`METRICS_ENABLED=false` in `.env.api` removes the middleware from the stack and
+unmounts the endpoint entirely (restart, no rebuild) — the kill switch.
+
+What it adds beyond the DB-shaped metrics from postgres-exporter:
+
+| Metric | Answers |
+|---|---|
+| `af3cache_query_{sequences,hits}_total` | **cache hit ratio** — the table's `count` is per-REQUEST while `hit_count` is per-SEQUENCE, so those two columns cannot form a ratio |
+| `af3cache_http_request_duration_seconds` | p95 latency per route |
+| `af3cache_app_errors_total{code}` | `AppError`s, which were previously counted and logged NOWHERE |
+| `af3cache_osdf_verify_inflight` | the only signal for a hung `pelican object get` (the timeout covers the queue wait, not the fetch) |
+| `af3cache_token_issue_total{result}` | `pelican token create` failing = no job can upload, while `/healthz` stays green |
+| `af3cache_classify_total{result}` | separates a genuine no-hit from diamond being broken — it returns UNCLASSIFIED on every failure path and never raises |
+| `af3cache_db_pool_checked_out` | vs 60 (pool_size 20 + max_overflow 40) |
+
+> **Label cardinality is load-bearing.** Requests are labelled by route TEMPLATE
+> (`/v1/uploads/{ingestion_id}/complete`), never the raw path — there are 423k+
+> ingestion ids. Anything unrouted collapses to the literal `<unmatched>`, so
+> internet background noise against a public IP cannot mint one permanent series
+> per junk URL. If you add middleware, keep it OUTSIDE the router or
+> `scope["route"]` will not be populated.
+
+### Running the test suite
+
+`tests/conftest.py` hardcodes `postgresql://af3:af3@localhost:5432`, which **on a
+deployed VM is the production database**. Never run pytest directly on the host.
+Use a throwaway Postgres in its own network namespace:
+
+```bash
+docker run -d --name af3-pgtest -e POSTGRES_USER=af3 -e POSTGRES_PASSWORD=af3 \
+           -e POSTGRES_DB=postgres postgres:16
+docker run --rm --network container:af3-pgtest -v /opt/af3-cache:/w -w /w \
+  -e PYTHONPATH=/w -e HOME=/tmp --entrypoint sh af3cache-api -c \
+  '/bin/uv pip install -q pytest pytest-asyncio && python -m pytest -q'
+docker rm -f af3-pgtest
+```
+
+`--network container:` makes `localhost` inside the test container resolve to the
+throwaway, so production is unreachable by construction. Afterwards remove the
+root-owned `__pycache__` the container leaves behind:
+`sudo find /opt/af3-cache -name __pycache__ -type d -exec rm -rf {} +`
+
+> **Known failures (pre-existing, 3 of 168):** `test_no_credential_rejected`,
+> `test_complete_requires_api_key`, `test_request_requires_api_key` all fail with
+> `TypeError: not all arguments converted during string formatting`.
+> `RedactSecretsFilter._KV_RE` in `app/core/logging.py` matches the format string's
+> OWN placeholder in `app/core/security.py` (`x-api-key=%s` becomes
+> `x-api-key=<redacted>`), leaving zero placeholders with two args. In production
+> this silently kills that auth-rejection log line. Scheduled for the phase 4
+> logging rework.
+
 The `af3cache_reap_exposure` metric is **read-only**. It counts what the
 maintenance/reap job *would* delete. That job is deliberately not scheduled — see
 the Phase 9 warning.

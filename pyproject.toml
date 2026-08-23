@@ -17,6 +17,11 @@ dependencies = [
     "pydantic-settings>=2.6",
     "pyjwt[crypto]>=2.10",
     "httpx>=0.28",
+    # Prometheus /metrics. Chosen over prometheus-fastapi-instrumentator: the
+    # metrics that matter here (cache hit ratio, OSDF timing, classifier
+    # degradation, pool saturation) need this library directly anyway, so the
+    # wrapper would be an ADDITIONAL dependency rather than a replacement.
+    "prometheus-client>=0.21",
 ]
 
 [dependency-groups]

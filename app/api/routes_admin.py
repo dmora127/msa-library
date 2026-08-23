@@ -89,9 +89,31 @@ async def update_source(
     body: SourceUpdate,
     svc: SettingsService = Depends(get_settings_service),
 ) -> SourceInfo:
-    """Toggle a source's enabled flag (query visibility; for the community
-    source, also gates job uploads)."""
-    if not await svc.set_source_enabled(name, body.enabled):
+    """Update a source: enabled flag, idle_ttl_days, and/or notes.
+
+    Only fields PRESENT in the request body are written, so idle_ttl_days can be
+    set to null ("never cull") distinctly from being omitted. Previously this
+    endpoint accepted only `enabled` and silently discarded everything else while
+    returning 200 with an unchanged body -- which read exactly like success.
+    """
+    supplied = body.model_dump(exclude_unset=True)
+    # `name` is accepted only so a GET response can be round-tripped; it is not
+    # a rename and must agree with the path.
+    body_name = supplied.pop("name", None)
+    if body_name is not None and body_name != name:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"body name {body_name!r} does not match path {name!r}; "
+                "this endpoint cannot rename a source"
+            ),
+        )
+    if not supplied:
+        raise HTTPException(
+            status_code=400,
+            detail="no updatable fields supplied (enabled, idle_ttl_days, notes)",
+        )
+    if not await svc.update_source(name, supplied):
         raise HTTPException(status_code=404, detail=f"unknown source: {name}")
     row = next(s for s in await svc.list_sources() if s.name == name)
     return SourceInfo(

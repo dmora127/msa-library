@@ -132,3 +132,81 @@ async def test_update_unknown_source_404(client):
 async def test_put_validation(client, payload):
     r = await client.put("/v1/admin/config", json=payload, headers=ADMIN)
     assert r.status_code == 422
+
+
+# --- PUT /v1/admin/sources/{name} partial updates ---------------------------
+# Regression cover for a real trap: this endpoint used to accept ONLY `enabled`
+# and Pydantic silently discarded every other field, so a request setting
+# idle_ttl_days returned HTTP 200 with a body echoing the UNCHANGED value. It
+# was indistinguishable from success.
+
+
+async def test_update_source_sets_idle_ttl_days(client):
+    r = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}", json={"idle_ttl_days": 180}, headers=ADMIN
+    )
+    assert r.status_code == 200
+    assert r.json()["idle_ttl_days"] == 180
+
+
+async def test_update_source_can_set_idle_ttl_null(client):
+    """null is meaningful ("never cull") and must differ from "not supplied"."""
+    r = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}", json={"idle_ttl_days": None}, headers=ADMIN
+    )
+    assert r.status_code == 200
+    assert r.json()["idle_ttl_days"] is None
+
+
+async def test_update_source_leaves_unsupplied_fields_alone(client):
+    await client.put(
+        f"/v1/admin/sources/{COMMUNITY}",
+        json={"idle_ttl_days": 42, "notes": "keep me"},
+        headers=ADMIN,
+    )
+    # Toggling only `enabled` must not disturb the other columns.
+    r = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}", json={"enabled": True}, headers=ADMIN
+    )
+    assert r.status_code == 200
+    assert r.json()["idle_ttl_days"] == 42
+    assert r.json()["notes"] == "keep me"
+
+
+async def test_update_source_rejects_unknown_fields(client):
+    """The whole point: an unsupported field must NOT be silently dropped."""
+    r = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}",
+        json={"enabled": True, "bogus_field": 1},
+        headers=ADMIN,
+    )
+    assert r.status_code == 422
+
+
+async def test_update_source_accepts_matching_name_but_refuses_rename(client):
+    ok = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}",
+        json={"name": COMMUNITY, "enabled": True},
+        headers=ADMIN,
+    )
+    assert ok.status_code == 200
+    bad = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}",
+        json={"name": "Something Else", "enabled": True},
+        headers=ADMIN,
+    )
+    assert bad.status_code == 400
+
+
+async def test_update_source_requires_at_least_one_field(client):
+    r = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}", json={}, headers=ADMIN
+    )
+    assert r.status_code == 400
+
+
+async def test_update_source_rejects_non_positive_ttl(client):
+    r = await client.put(
+        f"/v1/admin/sources/{COMMUNITY}", json={"idle_ttl_days": 0}, headers=ADMIN
+    )
+    assert r.status_code == 422

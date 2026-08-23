@@ -29,6 +29,14 @@ scrape_configs:
   - job_name: postgres
     static_configs: [{ targets: ["postgres-exporter:9187"] }]
 
+  # The application's own /metrics. Scraped DIRECTLY over the compose network,
+  # never through Caddy -- the Caddyfile 404s /metrics at the edge so it is not
+  # publicly readable. Cache hit ratio, per-route latency, OSDF/token/classifier
+  # outcomes and DB pool occupancy all come from here.
+  - job_name: af3cache-api
+    metrics_path: /metrics
+    static_configs: [{ targets: ["api:8000"] }]
+
   # Public edge, as an outside client sees it. Split into two jobs because the
   # endpoints cost wildly different amounts: /healthz is a `select 1` (~10ms),
   # while /v1/stats is 8 scalar subqueries over a 465k-row table (~490ms).

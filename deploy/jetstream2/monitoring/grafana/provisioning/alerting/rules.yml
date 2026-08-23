@@ -637,6 +637,299 @@ groups:
       severity: warning
     annotations:
       summary: A scrape target has been unreachable for 15 minutes.
+  - uid: af3-token-issue-failing
+    title: Write-token issuance failing
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(increase(af3cache_token_issue_total{result!="ok"}[15m]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: pelican token create is failing. No OSPool job can upload; /healthz will still
+        report ok.'
+  - uid: af3-5xx-rate
+    title: Elevated 5xx rate
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(increase(af3cache_http_requests_total{status=~"5.."}[24h])) / clamp_min(sum(increase(af3cache_http_requests_total[24h])),
+          1) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 5
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: More than 5% of requests returned 5xx over the last 24h.
+  - uid: af3-osdf-unavailable
+    title: OSDF unavailable storm
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(increase(af3cache_app_errors_total{code="osdf_unavailable"}[1h]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 20
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: More than 20 osdf_unavailable errors in an hour -- the object store or the pelican CLI
+        is unhealthy.
+  - uid: af3-osdf-verify-wedged
+    title: OSDF verify queue wedged
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: af3cache_osdf_verify_inflight >= 4 and rate(af3cache_osdf_fetch_seconds_count[15m]) == 0
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    labels:
+      severity: warning
+    annotations:
+      summary: Verify slots are all occupied but no fetch has completed in 15m -- the signature of a hung
+        `pelican object get`. Restarting the api container clears it.
+  - uid: af3-classifier-broken
+    title: Classifier failing (not merely no-hit)
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(increase(af3cache_classify_total{result=~"binary_missing|timeout|nonzero_exit"}[1h]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 10
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: 'diamond is erroring rather than returning no-hits: binary missing, timing out, or exiting
+        non-zero. Uploads still succeed but stop being classified, silently.'
+  - uid: af3-db-pool-saturating
+    title: DB connection pool saturating
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: af3cache_db_pool_checked_out
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 45
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: Over 45 of 60 connections checked out (pool_size 20 + overflow 40).
   - uid: af3-a3m-capacity-warn
     title: A3M storage above 80% of quota
     condition: B
