@@ -48,6 +48,10 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Default min refresh floor is 5s; the af3cache-api scrape job runs at 1s
+      # (see prometheus.yml) specifically so the inflight gauges can refresh
+      # that fast too.
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: "1s"
       # Served under a sub-path behind Caddy -- same problem --prefix solves for
       # pgweb. Both are required or every asset URL 404s.
       # GF_SERVER_ROOT_URL is set in .env.monitoring: PUBLIC_HOST lives in

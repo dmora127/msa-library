@@ -33,7 +33,21 @@ scrape_configs:
   # never through Caddy -- the Caddyfile 404s /metrics at the edge so it is not
   # publicly readable. Cache hit ratio, per-route latency, OSDF/token/classifier
   # outcomes and DB pool occupancy all come from here.
+  #
+  # 1s scrape (job-level override, NOT the 30s global default the other jobs
+  # still use) so the inflight gauges -- af3cache_query_inflight,
+  # af3cache_osdf_verify_inflight -- and the 5s-windowed rate()/increase()
+  # panels on af3cache_http_requests_total reflect activity within ~1s instead
+  # of ~30s. (af3cache_ingestions_count is a DIFFERENT job -- postgres-exporter,
+  # still on the 30s global default -- so it isn't affected by this override.)
+  # scrape_timeout is well under scrape_interval since this is a lightweight
+  # in-process /metrics render, not a query. This is 30x the sample rate for
+  # every af3cache_http_* series (histograms especially), which eats into the
+  # shared 8GB retention.size backstop faster than the nominal 90d suggests --
+  # watch prometheus_tsdb_* if actual retention starts shrinking noticeably.
   - job_name: af3cache-api
+    scrape_interval: 1s
+    scrape_timeout: 500ms
     metrics_path: /metrics
     static_configs: [{ targets: ["api:8000"] }]
 

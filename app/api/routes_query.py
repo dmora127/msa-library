@@ -13,7 +13,7 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
-from app.core.metrics import record_query
+from app.core.metrics import QUERY_INFLIGHT, record_query
 from app.schemas.query import QueryHit, QueryRequest, QueryResponse, QuerySeqResult
 from app.services.deps import get_sequence_service
 from app.services.sequence_service import SequenceService
@@ -40,60 +40,64 @@ async def query(
     req: QueryRequest,
     svc: SequenceService = Depends(get_sequence_service),
 ) -> QueryResponse:
-    expected_seq: str | None = None
-    if req.sequence:
-        normalized, h = svc.normalize_and_hash(req.sequence)
-        expected_seq = normalized
-        order = [h]
-    else:
-        order = list(dict.fromkeys(req.seq_hashes or []))
-
-    rows = await svc.lookup(order, req.sources)
-
-    grouped: dict[str, list[QueryHit]] = {h: [] for h in order}
-    for r in rows:
-        if expected_seq is not None and r.sequence != expected_seq:
-            log.warning(
-                "query: dropping hit for %s source=%s — stored sequence != requested "
-                "(hash collision / corruption guard)",
-                r.seq_hash,
-                r.source,
-            )
-            continue
-        grouped.setdefault(r.seq_hash, []).append(
-            QueryHit(
-                seq_hash=r.seq_hash,
-                source=r.source,
-                osdf_uri=r.osdf_uri,
-                db_version=r.db_version,
-                species=r.species,
-                query_name=r.query_name,
-                a3m_size_bytes=r.a3m_size_bytes,
-                a3m_sha256=r.a3m_sha256,
-                n_sequences=r.n_sequences,
-                seq_length=r.seq_length,
-            )
-        )
-
-    # Best-effort per-day metrics. Bumped *after* grouping so hit_count sees
-    # the post-collision-guard picture. Wrapped in a SAVEPOINT so a write
-    # failure here (table missing, lock timeout, etc.) doesn't invalidate the
-    # outer read transaction and 500 the query.
-    hits_served = sum(1 for h in order if grouped[h])
-    # Real-time counterpart to the query_metrics table below. Same numbers, no
-    # DB write -- which is what makes a cache hit ratio cheap to graph.
-    record_query(len(order), hits_served)
+    QUERY_INFLIGHT.inc()
     try:
-        async with svc.session.begin_nested():
-            await svc.session.execute(
-                text(_QUERY_METRIC_BUMP_SQL), {"hits": hits_served}
-            )
-    except Exception:
-        log.warning("query_metrics increment failed", exc_info=True)
+        expected_seq: str | None = None
+        if req.sequence:
+            normalized, h = svc.normalize_and_hash(req.sequence)
+            expected_seq = normalized
+            order = [h]
+        else:
+            order = list(dict.fromkeys(req.seq_hashes or []))
 
-    return QueryResponse(
-        results=[
-            QuerySeqResult(seq_hash=h, found=bool(grouped[h]), hits=grouped[h])
-            for h in order
-        ]
-    )
+        rows = await svc.lookup(order, req.sources)
+
+        grouped: dict[str, list[QueryHit]] = {h: [] for h in order}
+        for r in rows:
+            if expected_seq is not None and r.sequence != expected_seq:
+                log.warning(
+                    "query: dropping hit for %s source=%s — stored sequence != requested "
+                    "(hash collision / corruption guard)",
+                    r.seq_hash,
+                    r.source,
+                )
+                continue
+            grouped.setdefault(r.seq_hash, []).append(
+                QueryHit(
+                    seq_hash=r.seq_hash,
+                    source=r.source,
+                    osdf_uri=r.osdf_uri,
+                    db_version=r.db_version,
+                    species=r.species,
+                    query_name=r.query_name,
+                    a3m_size_bytes=r.a3m_size_bytes,
+                    a3m_sha256=r.a3m_sha256,
+                    n_sequences=r.n_sequences,
+                    seq_length=r.seq_length,
+                )
+            )
+
+        # Best-effort per-day metrics. Bumped *after* grouping so hit_count sees
+        # the post-collision-guard picture. Wrapped in a SAVEPOINT so a write
+        # failure here (table missing, lock timeout, etc.) doesn't invalidate the
+        # outer read transaction and 500 the query.
+        hits_served = sum(1 for h in order if grouped[h])
+        # Real-time counterpart to the query_metrics table below. Same numbers, no
+        # DB write -- which is what makes a cache hit ratio cheap to graph.
+        record_query(len(order), hits_served)
+        try:
+            async with svc.session.begin_nested():
+                await svc.session.execute(
+                    text(_QUERY_METRIC_BUMP_SQL), {"hits": hits_served}
+                )
+        except Exception:
+            log.warning("query_metrics increment failed", exc_info=True)
+
+        return QueryResponse(
+            results=[
+                QuerySeqResult(seq_hash=h, found=bool(grouped[h]), hits=grouped[h])
+                for h in order
+            ]
+        )
+    finally:
+        QUERY_INFLIGHT.dec()

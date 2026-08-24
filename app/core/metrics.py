@@ -80,6 +80,13 @@ QUERY_HITS = Counter(
     "af3cache_query_hits_total",
     "Sequences that returned at least one hit (hit-ratio numerator).",
 )
+# /v1/query has no DB row/status like an ingestion -- it's one read + a
+# best-effort metrics bump. This is the only signal for "requests currently
+# being handled" (vs. HTTP_DURATION, which only reports after a request ends).
+QUERY_INFLIGHT = Gauge(
+    "af3cache_query_inflight",
+    "Requests to /v1/query currently being handled.",
+)
 
 # --- OSDF verify ------------------------------------------------------------
 OSDF_FETCH = Counter(

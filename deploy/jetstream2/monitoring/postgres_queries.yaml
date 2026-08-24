@@ -53,9 +53,12 @@ af3cache_queries:
     - count:     { usage: "GAUGE", description: "queries today" }
     - hit_count: { usage: "GAUGE", description: "sequences served with >=1 hit today" }
 
-# A3M storage consumed on OSDF. Only status='active' rows have live objects, so
-# this is the figure that maps to real space (all 465k rows are active today and
-# none have a NULL size, but the filter keeps it honest if that changes).
+# A3M storage consumed on OSDF. 'active' AND 'held' rows both have live objects
+# on OSDF -- migration 0014 parks a 'held' entry out of circulation without
+# deleting it, so the row and object survive indefinitely. Only 'stale' rows have
+# been (or are due to be) reclaimed. Excluding 'held' undercounts real space used
+# the moment anything gets parked, which is what threw off the 7d growth/capacity
+# panels below the first time entries were flipped to 'held'.
 # Measured cost: ~90ms warm (parallel seq scan) at a 30s scrape = ~0.3% duty
 # cycle. If msa_cache_entries grows an order of magnitude, move this to a slower
 # scrape rather than dropping it.
@@ -65,9 +68,9 @@ af3cache_a3m:
            coalesce(sum(a3m_size_bytes), 0)::bigint as bytes,
            count(*) as entries
     from public.msa_cache_entries
-    where status = 'active'
+    where status in ('active', 'held')
     group by 1
   metrics:
     - source:  { usage: "LABEL", description: "MSA source" }
-    - bytes:   { usage: "GAUGE", description: "bytes of a3m objects held on OSDF" }
-    - entries: { usage: "GAUGE", description: "active entries contributing to that total" }
+    - bytes:   { usage: "GAUGE", description: "bytes of a3m objects held on OSDF (active + held)" }
+    - entries: { usage: "GAUGE", description: "active+held entries contributing to that total" }
