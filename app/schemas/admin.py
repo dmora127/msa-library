@@ -77,6 +77,46 @@ class SourceUpdate(BaseModel):
     notes: str | None = None
 
 
+class ReclassifyRequest(BaseModel):
+    """Single-item classification callback from the external BLAST pipeline.
+
+    sequence_hash is the sha256 of the normalized sequence (the app/core/hashing
+    contract) and must match msa_sequences.seq_hash for sequence_id — a safety
+    cross-check so a stale or transposed id can't relabel the wrong sequence.
+    Sentinel values ('Pending Classification', 'Unclassified') are rejected so
+    a row can never be re-armed back to pending through this endpoint.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sequence_id: int = Field(gt=0)
+    sequence_hash: str
+    species: str = Field(min_length=1, max_length=512)
+    query_name: str = Field(min_length=1, max_length=512)
+
+    @model_validator(mode="after")
+    def _check(self) -> ReclassifyRequest:
+        from app.core.hashing import is_valid_seq_hash
+        from app.services.classifier import PENDING_CLASSIFICATION, UNCLASSIFIED
+
+        if not is_valid_seq_hash(self.sequence_hash):
+            raise ValueError("sequence_hash must be 64-char lowercase hex")
+        self.species = self.species.strip()
+        self.query_name = self.query_name.strip()
+        for v in (self.species, self.query_name):
+            if not v or v in (PENDING_CLASSIFICATION, UNCLASSIFIED.species):
+                raise ValueError(
+                    "species/query_name must be a real classification, "
+                    "not empty or a sentinel value"
+                )
+        return self
+
+
+class ReclassifyResponse(BaseModel):
+    sequence_id: int
+    updated: int  # rows flipped from 'Pending Classification'; 0 is a valid no-op
+
+
 class AdminIngestRequest(BaseModel):
     """Admin-only bulk ingest of an a3m at an osdf_uri the caller controls.
 

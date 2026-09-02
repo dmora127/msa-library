@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.classifier import UNCLASSIFIED, Classifier
+from app.core.errors import SequenceHashMismatch, SequenceNotFound
+from app.services.classifier import PENDING_CLASSIFICATION, UNCLASSIFIED, Classifier
 from app.services.osdf_client import OsdfClient
 from app.services.settings_service import SettingsService
 
@@ -169,6 +170,53 @@ class MaintenanceService:
             scanned=scanned, updated=updated,
             last_id=last_id, exhausted=exhausted,
         )
+
+    async def apply_external_classification(
+        self, sequence_id: int, sequence_hash: str, species: str, query_name: str
+    ) -> int:
+        """Apply an externally computed classification (BLAST callback) to every
+        cache entry of `sequence_id` still carrying the 'Pending Classification'
+        sentinel in BOTH species and query_name. sequence_hash must match the
+        stored seq_hash — guards against a stale/transposed id on the caller's
+        side. Returns rows updated (0 = nothing pending; idempotent)."""
+        row = (
+            await self.session.execute(
+                text("select seq_hash from public.msa_sequences where id = :id"),
+                {"id": sequence_id},
+            )
+        ).first()
+        if row is None:
+            raise SequenceNotFound(f"msa_sequences.id={sequence_id} not found")
+        if row.seq_hash != sequence_hash:
+            raise SequenceHashMismatch(
+                "sequence_hash does not match the stored seq_hash",
+                extra={"sequence_id": sequence_id},
+            )
+        updated = len(
+            (
+                await self.session.execute(
+                    text(
+                        """
+                        update public.msa_cache_entries
+                           set species = :sp, query_name = :qn, updated_at = now()
+                         where sequence_id = :sid
+                           and species = :pending
+                           and query_name = :pending
+                        returning id
+                        """
+                    ),
+                    {
+                        "sp": species, "qn": query_name,
+                        "sid": sequence_id, "pending": PENDING_CLASSIFICATION,
+                    },
+                )
+            ).all()
+        )
+        log.info(
+            "external reclassify: sequence_id=%s updated=%d species=%r",
+            sequence_id, updated, species,
+        )
+        return updated
 
     async def run(self) -> MaintenanceResult:
         marked = await self.mark_idle_stale()

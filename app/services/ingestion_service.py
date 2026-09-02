@@ -32,7 +32,7 @@ from app.schemas.ingestion import (
     UploadRequestResponse,
 )
 from app.services.a3m_validator import A3mInvalid, A3mValidator
-from app.services.classifier import Classifier
+from app.services.classifier import PENDING_CLASSIFICATION, Classifier
 from app.services.osdf_client import ObjectTooLarge, OsdfClient
 from app.services.sequence_service import SequenceService
 from app.services.settings_service import SettingsService
@@ -342,14 +342,15 @@ class IngestionService:
         - Job upload (/v1/uploads/{id}/complete) passes `overrides=None`: we
           short-circuit to ('Pending Classification', 'Pending Classification')
           and DO NOT invoke the classifier. Diamond is off the critical path;
-          a separate cron/sweep will filter rows by this sentinel and run
-          classification asynchronously.
+          an external BLAST pipeline backfills rows carrying this sentinel via
+          POST /v1/admin/reclassify. (The /maintenance/reclassify sweep only
+          picks up 'Unclassified' rows, not this sentinel.)
         - Admin ingest (/v1/admin/ingest) passes a PublishOverrides instance.
           If both species + query_name are provided the classifier is skipped;
           otherwise it runs to fill the gaps (unchanged behavior).
         """
         if overrides is None:
-            return "Pending Classification", "Pending Classification"
+            return PENDING_CLASSIFICATION, PENDING_CLASSIFICATION
         if overrides.species is not None and overrides.query_name is not None:
             return overrides.species, overrides.query_name
         cls = await self.classifier.classify(sequence)

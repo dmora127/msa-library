@@ -15,6 +15,8 @@ from app.schemas.admin import (
     AdminConfig,
     AdminConfigUpdate,
     AdminIngestRequest,
+    ReclassifyRequest,
+    ReclassifyResponse,
     SourceInfo,
     SourceUpdate,
 )
@@ -151,6 +153,28 @@ async def run_reclassify(
         "limit": limit,
         "after_id": after_id,
     }
+
+
+@router.post("/reclassify", response_model=ReclassifyResponse)
+async def reclassify_from_blast(
+    body: ReclassifyRequest,
+    svc: MaintenanceService = Depends(get_maintenance_service),
+) -> ReclassifyResponse:
+    """Single-item classification callback from the external BLAST pipeline.
+
+    NOT the batch sweep — that is POST /v1/admin/maintenance/reclassify, which
+    re-runs the local Classifier over 'Unclassified' rows. This endpoint takes
+    one externally computed (species, query_name) result and applies it to ALL
+    msa_cache_entries for the sequence that still carry 'Pending Classification'
+    in both fields (the sentinel the job-upload path writes; see
+    IngestionService._resolve_classification). sequence_hash must match the
+    stored seq_hash (409 on mismatch — guards against stale/transposed ids).
+    Idempotent: a repeat call returns 200 with updated=0.
+    """
+    updated = await svc.apply_external_classification(
+        body.sequence_id, body.sequence_hash, body.species, body.query_name
+    )
+    return ReclassifyResponse(sequence_id=body.sequence_id, updated=updated)
 
 
 @router.post("/ingest", response_model=UploadCompleteResponse)

@@ -57,6 +57,20 @@ class AlreadyCached(AppError):
     code = "already_cached"
 
 
+class SequenceNotFound(AppError):
+    status_code = 404
+    code = "sequence_not_found"
+
+
+class SequenceHashMismatch(AppError):
+    """Caller's sequence_hash disagrees with msa_sequences.seq_hash for the
+    given id — the caller's id↔hash pairing is stale or transposed; nothing
+    is updated."""
+
+    status_code = 409
+    code = "sequence_hash_mismatch"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handle(_: Request, exc: AppError) -> JSONResponse:

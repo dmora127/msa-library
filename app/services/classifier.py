@@ -39,6 +39,11 @@ DEFAULT_EVALUE_THRESHOLD = 0.0005
 
 _UNCLASSIFIED_LABEL = "Unclassified"
 
+# Sentinel written by the job-upload path (overrides=None) meaning "an external
+# pipeline will classify this later". scripts/ospool_msa_ingest.py and
+# scripts/admin_msa_ingest.py carry the same literal (they don't import app).
+PENDING_CLASSIFICATION = "Pending Classification"
+
 
 @dataclass(frozen=True)
 class Classification:
