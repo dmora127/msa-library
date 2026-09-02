@@ -10,6 +10,19 @@
 # PUBLIC_HOST + CADDY_TLS come from .env.api (preserved on the VM, never
 # rsynced), so this committed file is safe to overwrite on every deploy.
 
+# Shared API-edge hardening: block /metrics + /readyz from the public edge,
+# then proxy everything else to the API. Imported by every public hostname so
+# the guard can never drift between them.
+(api) {
+	@internal path /metrics /metrics/* /readyz
+	handle @internal {
+		respond 404
+	}
+	handle {
+		reverse_proxy api:8000
+	}
+}
+
 {$PUBLIC_HOST} {
 	{$CADDY_TLS}
 	encode gzip
@@ -51,22 +64,12 @@
 		}
 	}
 
-	# Internal-only endpoints. Prometheus scrapes api:8000 directly on the compose
-	# network, so these never need to traverse the edge. Responds 404 rather than
-	# 403 so their existence is not advertised.
-	#
-	# /metrics exposes route names, error-code distribution, upload volumes and DB
-	# pool sizing -- not credentials, but useful reconnaissance. /readyz arrives in
-	# phase 4 and is listed now so both land in a single Caddy recreate.
-	#
-	# NOTE: without this block the catch-all below would proxy them straight to
-	# api:8000, i.e. world-readable the moment the endpoint exists.
-	@internal path /metrics /metrics/* /readyz
-	handle @internal {
-		respond 404
-	}
-
-	# Everything else is the API.
+	# Internal-only endpoints, and everything else (the API). Both are handled
+	# by the (api) snippet above: Prometheus scrapes api:8000 directly on the
+	# compose network, so /metrics and /readyz never need to traverse the edge
+	# -- the snippet responds 404 rather than 403 so their existence is not
+	# advertised. Without that guard the catch-all would proxy them straight
+	# to api:8000, i.e. world-readable the moment the endpoint exists.
 	#
 	# CORS is owned by the APP (app/main.py, CORSMiddleware), not by this file,
 	# so the origin allowlist lives with the code and covers only the public
@@ -96,7 +99,17 @@
 	#
 	# 	reverse_proxy api:8000
 	# }
-	handle {
-		reverse_proxy api:8000
-	}
+	import api
+}
+
+# Alternate hostname for a real, owned domain -- API only (no Grafana/pgweb).
+# No `tls` directive: a real domain isn't rate-limit-shared the way sslip.io
+# is, so Caddy's normal automatic HTTPS (Let's Encrypt, falling back to
+# ZeroSSL) applies directly. This is additive: {$PUBLIC_HOST} above is
+# untouched, so the sslip.io URL keeps working exactly as it does today.
+# Demo domain for now -- sslip.io remains primary until the official rollout
+# picks a permanent hostname.
+{$PUBLIC_HOST_ALT} {
+	encode gzip
+	import api
 }
