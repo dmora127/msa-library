@@ -162,6 +162,40 @@ class MsaIngestion(Base):
     )
 
 
+class ReclassJob(Base):
+    """One external NR BLAST reclassification job (remote id as PK). Written
+    by the admin endpoints under /v1/admin/classification/jobs; see 0015."""
+
+    __tablename__ = "reclass_jobs"
+
+    job_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    input_name: Mapped[str] = mapped_column(Text, nullable=False)
+    sequence_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    residue_count: Mapped[int | None] = mapped_column(BigInteger)
+    input_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="QUEUED", server_default="QUEUED"
+    )
+    remote_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remote_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    remote_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    posted_so_far: Mapped[int | None] = mapped_column(Integer)
+    summary: Mapped[dict | None] = mapped_column(JSONB)
+    last_status: Mapped[dict | None] = mapped_column(JSONB)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    poll_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 

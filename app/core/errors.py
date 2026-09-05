@@ -109,6 +109,18 @@ class SimilarityBuildFailed(AppError):
     code = "similarity_build_failed"
 
 
+class ReclassJobExists(AppError):
+    """POST /v1/admin/classification/jobs with a job_id already recorded."""
+
+    status_code = 409
+    code = "reclass_job_exists"
+
+
+class ReclassJobNotFound(AppError):
+    status_code = 404
+    code = "reclass_job_not_found"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handle(_: Request, exc: AppError) -> JSONResponse:

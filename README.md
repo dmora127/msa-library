@@ -58,6 +58,15 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
   Implemented but **disabled** until `SIMILARITY_*_BUILD_ENABLED=true`; host
   cron drives them (`deploy/jetstream2/helpers/similarity_*.sh`). The default
   `SIMILARITY_DB_MODE=ephemeral` rebuilds the target per request instead.
+- `GET /v1/admin/classification/pending.fa` — FASTA (`>{sequence_id}|{seq_hash}`)
+  of every sequence with an active entry still marked `Pending Classification`
+  (≥ `RECLASS_EXPORT_MIN_LENGTH` aa; `?min_length=`, `?max_length=`, `?limit=`).
+  `helpers/reclassify_export.sh` ships it nightly to the NR BLAST box and
+  records the remote job id via `POST /v1/admin/classification/jobs`;
+  `helpers/reclassify_poll.sh` stores each remote `reclass-status` JSON via
+  `PUT /v1/admin/classification/jobs/{id}/status` while a job is
+  QUEUED/RUNNING (`GET …/jobs?active=true`). Results arrive per sequence through
+  `POST /v1/admin/reclassify`.
 - `GET /healthz` — DB ping, no auth.
 
 ### Retention & identity

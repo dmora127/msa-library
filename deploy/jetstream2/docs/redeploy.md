@@ -169,6 +169,7 @@ Docker creates empty directories over them.
 ```bash
 sudo mkdir -p /opt/diamond          # required even for CLASSIFIER_IMPL=noop
 sudo mkdir -p /mnt/pgdata/similarity && sudo chown "$USER" /mnt/pgdata/similarity
+sudo mkdir -p /mnt/pgdata/reclass    && sudo chown "$USER" /mnt/pgdata/reclass
 ls -l ~/private-key.pem ~/.config/pelican
 ```
 
@@ -176,6 +177,9 @@ ls -l ~/private-key.pem ~/.config/pelican
   mode (nightly/delta generations + symlinks). Empty is fine; unused while
   `SIMILARITY_DB_MODE=ephemeral`. Must be on the data volume (Phase 2), not
   the root disk.
+- **`/mnt/pgdata/reclass`** — local copies of the FASTAs
+  `helpers/reclassify_export.sh` ships to the NR BLAST box (newest 8 kept).
+  Not a bind mount; the host helper writes it directly.
 
 - **`/opt/diamond`** — empty is fine for `noop`. For `CLASSIFIER_IMPL=diamond`,
   copy the ~3 GB binary + SwissProt DB from an existing instance:
@@ -343,6 +347,12 @@ MAILTO=you@example.edu
 # are true in .env.api.
 # 20 2 * * *   /opt/af3-cache/deploy/jetstream2/helpers/similarity_nightly.sh >> /mnt/pgdata/backups/similarity_nightly.log 2>&1
 # 50 * * * *   /opt/af3-cache/deploy/jetstream2/helpers/similarity_delta.sh   >> /mnt/pgdata/backups/similarity_delta.log 2>&1
+
+# NR-BLAST reclassification (see "Reclassification export" below). The export
+# submits a job every night regardless of jobs still running (the box queues
+# them); the poller opens an ssh session ONLY while a job is QUEUED/RUNNING.
+# 30 0 * * *   /opt/af3-cache/deploy/jetstream2/helpers/reclassify_export.sh >> /mnt/pgdata/backups/reclassify_export.log 2>&1
+# */10 * * * * /opt/af3-cache/deploy/jetstream2/helpers/reclassify_poll.sh   >> /mnt/pgdata/backups/reclassify_poll.log 2>&1
 ```
 
 > **Do NOT schedule `POST /v1/admin/maintenance/run` (the mark-stale + reap job).**
@@ -665,3 +675,74 @@ safely. Requests resolve both symlinks once, up front.
 Kill switches: `SIMILARITY_SEARCH_ENABLED=false` makes opted-in requests return
 409 `similarity_disabled` (exact lookups unaffected); the builders answer 409
 `similarity_build_disabled` while their flags are false.
+
+## Reclassification export (NR BLAST)
+
+Job uploads publish cache entries with `species = query_name = 'Pending
+Classification'` (the in-app sweep only handles `Unclassified`). Those rows are
+labelled by an external pipeline on the NR BLAST box
+(`exouser@<blast-box-ip>`), which POSTs one result per sequence to the existing
+`POST /v1/admin/reclassify`. This VM's side of it is two cron helpers and three
+admin endpoints; nothing runs inside the api container on a timer, and the
+container has no ssh (keys live on the host).
+
+```
+host cron (exouser)                     api container                  BLAST box
+30 0 * * *  reclassify_export.sh
+  GET /v1/admin/classification/pending.fa ──▶ streams FASTA (>{sequence_id}|{seq_hash})
+  ◀── /mnt/pgdata/reclass/pending-<ts>.fa          (RECLASS_EXPORT_MIN_LENGTH applied)
+  scp ─────────────────────────────────────────────────────▶ /media/volume/mmseq2-data/inbox/
+  JOB=$(ssh … reclass-submit inbox/pending-<ts>.fa) ◀─────── job id, returns at once
+  POST /v1/admin/classification/jobs {job_id,…} ──▶ reclass_jobs row (QUEUED)
+*/10 * * * * reclassify_poll.sh
+  GET /jobs?active=true ──▶ []  → exit 0, no ssh
+                      ──▶ [job] → ssh … reclass-status <job> ◀──── JSON
+                              PUT /jobs/<job>/status ──▶ row updated; terminal
+                                                          status stops polling
+                                                    ◀──── meanwhile the box POSTs
+                                                          /v1/admin/reclassify per sequence
+```
+
+Remote contract: `reclass-submit inbox/<file>` prints a job id
+(`20260905T071245Z-64839f`); `reclass-status <job>` prints one JSON object with
+`status ∈ QUEUED|RUNNING|DONE|FAILED|KILLED|UNKNOWN`, `records`,
+`posted_so_far`, `summary {rows, status_200, status_NO_HIT, …}`, timestamps,
+`exit_code`, `log_tail`. The box forgets jobs after **15 days** (then
+`UNKNOWN`, exit 2); the `reclass_jobs` row here is the durable record.
+
+Endpoints (admin key): `GET /v1/admin/classification/pending.fa`
+(`?min_length=`, `?max_length=`, `?limit=`; headers `X-Sequence-Count`,
+`X-Min-Length`), `POST /v1/admin/classification/jobs`,
+`GET /v1/admin/classification/jobs[?active=true]`, `GET …/jobs/{id}`,
+`PUT …/jobs/{id}/status` (body = the raw `reclass-status` JSON).
+
+Helper env overrides (defaults): `REMOTE=exouser@<blast-box-ip>`,
+`REMOTE_DATA_DIR=/media/volume/mmseq2-data`,
+`REMOTE_SUBMIT=/home/exouser/.local/bin/reclass-submit`,
+`REMOTE_STATUS=/home/exouser/.local/bin/reclass-status` (full paths on purpose:
+`~/.local/bin` is not on the PATH of a non-interactive ssh session),
+`EXPORT_DIR=/mnt/pgdata/reclass`, `KEEP=8`,
+`EXTRA_QUERY=` (e.g. `limit=50`, `max_length=2000`). The length floor is
+`RECLASS_EXPORT_MIN_LENGTH` in `.env.api` (30).
+
+One-time prep and first run:
+
+```bash
+cd /opt/af3-cache/deploy/jetstream2
+H=$(grep '^PUBLIC_HOST=' .env.api | cut -d= -f2); ADM=$(grep '^ADMIN_API_KEY=' .env.api | cut -d= -f2)
+sudo mkdir -p /mnt/pgdata/reclass && sudo chown "$USER" /mnt/pgdata/reclass      # Phase 5
+ssh -o StrictHostKeyChecking=accept-new exouser@<blast-box-ip> \
+    /home/exouser/.local/bin/reclass-status nosuchjob        # records host key; expect UNKNOWN JSON, exit 2
+curl -sk -D - -o /tmp/p.fa "https://$H/v1/admin/classification/pending.fa?limit=5" -H "X-API-Key: $ADM" && head -2 /tmp/p.fa
+EXTRA_QUERY=limit=50 helpers/reclassify_export.sh          # small real job; prints job=<id>
+helpers/reclassify_poll.sh                                 # repeat every few minutes until DONE
+curl -sk "https://$H/v1/admin/classification/jobs" -H "X-API-Key: $ADM" | python3 -m json.tool | head -40
+```
+
+Then uncomment the two cron lines in Phase 9. Logs:
+`/mnt/pgdata/backups/reclassify_export.log`, `…/reclassify_poll.log`, the
+api's `af3cache.classification_export` lines in `docker logs af3cache-api-1`,
+and the remote run log the box keeps per job. Consecutive nightly exports
+overlap while a multi-day job is still running; that is by design (the box
+queues, the callback only touches rows still pending). Re-ingesting a sequence
+resets it to pending, so it will simply appear in a later export.

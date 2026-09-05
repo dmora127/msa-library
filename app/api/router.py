@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.api import (
     routes_admin,
+    routes_classification_admin,
     routes_health,
     routes_ingestion,
     routes_query,
@@ -26,3 +27,4 @@ api_router.include_router(routes_query_v2.router)  # public; v1 + similarity opt
 api_router.include_router(routes_ingestion.router)
 api_router.include_router(routes_admin.router)
 api_router.include_router(routes_similarity_admin.router)
+api_router.include_router(routes_classification_admin.router)

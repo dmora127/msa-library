@@ -6,6 +6,9 @@ msa_sources.enabled and is managed via the /v1/admin/sources endpoints.
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -218,3 +221,72 @@ class SimilarityBuildResponse(BaseModel):
     manifest: SimilarityManifestInfo
     elapsed_seconds: float
     retired: list[str]  # generation dirs removed by retention after promotion
+
+
+# --- NR BLAST reclassification jobs -----------------------------------------
+
+
+class ReclassJobCreate(BaseModel):
+    """Recorded by helpers/reclassify_export.sh right after `reclass-submit`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(min_length=1, max_length=128)
+    input_name: str = Field(min_length=1, max_length=255)
+    sequence_count: int = Field(ge=0)
+    residue_count: int | None = Field(default=None, ge=0)
+    input_bytes: int | None = Field(default=None, ge=0)
+
+
+class ReclassRemoteStatus(BaseModel):
+    """The raw JSON printed by `reclass-status <job>` on the BLAST box. Known
+    fields are typed; anything else is kept (extra="allow") and stored verbatim
+    in reclass_jobs.last_status."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    job: str | None = None
+    source: str | None = None
+    bytes: int | None = None
+    records: int | None = None
+    submitted_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    exit_code: int | None = None
+    results: str | None = None
+    posted_so_far: int | None = None
+    input_retained: bool | None = None
+    summary: dict[str, Any] | None = None
+    log_tail: list[str] | None = None
+    error: str | None = None
+
+    @model_validator(mode="after")
+    def _normalise_status(self) -> ReclassRemoteStatus:
+        from app.services.reclass_jobs import STATES
+
+        self.status = self.status.strip().upper()
+        if self.status not in STATES:
+            raise ValueError(f"status must be one of {', '.join(STATES)}")
+        return self
+
+
+class ReclassJobOut(BaseModel):
+    job_id: str
+    input_name: str
+    sequence_count: int
+    residue_count: int | None
+    input_bytes: int | None
+    status: str
+    remote_submitted_at: datetime | None
+    remote_started_at: datetime | None
+    remote_finished_at: datetime | None
+    exit_code: int | None
+    posted_so_far: int | None
+    summary: dict[str, Any] | None
+    last_status: dict[str, Any] | None
+    last_error: str | None
+    poll_count: int
+    last_polled_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

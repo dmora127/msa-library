@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     similarity_delta_refresh_minutes: int = 60  # cron cadence; reported by /status
     similarity_delta_retention_minutes: int = 60
 
+    # --- NR BLAST reclassification export ---------------------------------
+    # GET /v1/admin/classification/pending.fa never exports sequences shorter
+    # than this (aa); peptides below it get no meaningful NR hit. Overridable
+    # per request with ?min_length=.
+    reclass_export_min_length: int = 30
+
     # Adjustable operational defaults (overridable via app_settings)
     max_upload_size_bytes: int = 104_857_600
     token_ttl_seconds: int = 1200
