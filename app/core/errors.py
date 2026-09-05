@@ -71,6 +71,44 @@ class SequenceHashMismatch(AppError):
     code = "sequence_hash_mismatch"
 
 
+class SimilarityDisabled(AppError):
+    """Caller opted into similarity_search but SIMILARITY_SEARCH_ENABLED is
+    false on this deployment. The exact-match part of the query still ran."""
+
+    status_code = 409
+    code = "similarity_disabled"
+
+
+class SimilarityUnavailable(AppError):
+    """Transient: mmseqs missing/failed/timed out, queue full, or (snapshot
+    mode) no active nightly generation. Caller may retry without the flag."""
+
+    status_code = 503
+    code = "similarity_unavailable"
+
+
+class SimilarityBuildDisabled(AppError):
+    """Nightly/delta build requested while its *_BUILD_ENABLED flag is false."""
+
+    status_code = 409
+    code = "similarity_build_disabled"
+
+
+class SimilarityBuildInProgress(AppError):
+    """Another nightly/delta build holds the process-level build lock."""
+
+    status_code = 409
+    code = "similarity_build_in_progress"
+
+
+class SimilarityBuildFailed(AppError):
+    """A nightly/delta build failed before promotion; the active generation
+    is untouched."""
+
+    status_code = 500
+    code = "similarity_build_failed"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handle(_: Request, exc: AppError) -> JSONResponse:

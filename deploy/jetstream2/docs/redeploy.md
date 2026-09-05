@@ -117,7 +117,8 @@ Add that key under **repo → Settings → Deploy keys → Add deploy key**, lea
 ssh -T git@github.com                              # expect "successfully authenticated"
 sudo mkdir -p /opt/af3-cache && sudo chown "$USER" /opt/af3-cache
 git clone <repo-ssh-url> /opt/af3-cache
-chmod +x /opt/af3-cache/deploy/jetstream2/helpers/reclassify*.sh   # no exec bit in git
+chmod +x /opt/af3-cache/deploy/jetstream2/helpers/reclassify*.sh \
+         /opt/af3-cache/deploy/jetstream2/helpers/similarity_*.sh   # no exec bit in git
 ```
 
 ## Phase 4 — Configuration
@@ -162,13 +163,19 @@ grep -E '^(PUBLIC_HOST|API_KEYS|ADMIN_API_KEY|PGWEB_AUTH_PASS)=' .env.api
 
 ## Phase 5 — Host assets the repo cannot carry
 
-`docker-compose.api.yml` bind-mounts three host paths. **All must exist**, or
+`docker-compose.api.yml` bind-mounts four host paths. **All must exist**, or
 Docker creates empty directories over them.
 
 ```bash
 sudo mkdir -p /opt/diamond          # required even for CLASSIFIER_IMPL=noop
+sudo mkdir -p /mnt/pgdata/similarity && sudo chown "$USER" /mnt/pgdata/similarity
 ls -l ~/private-key.pem ~/.config/pelican
 ```
+
+- **`/mnt/pgdata/similarity`** — `SIMILARITY_DB_ROOT` for the MMseqs2 snapshot
+  mode (nightly/delta generations + symlinks). Empty is fine; unused while
+  `SIMILARITY_DB_MODE=ephemeral`. Must be on the data volume (Phase 2), not
+  the root disk.
 
 - **`/opt/diamond`** — empty is fine for `noop`. For `CLASSIFIER_IMPL=diamond`,
   copy the ~3 GB binary + SwissProt DB from an existing instance:
@@ -289,6 +296,10 @@ curl -sk https://$H/v1/admin/config -H "X-API-Key: $ADM"
 
 docker exec af3cache-api-1 pelican --version                             # pelican mode only
 docker exec af3cache-api-1 /opt/diamond/diamond --version                # diamond mode only
+docker exec af3cache-api-1 mmseqs version                                # prints the build commit
+curl -sk https://$H/v1/admin/similarity/status -H "X-API-Key: $ADM"       # mmseqs_version non-null
+curl -sk https://$H/v2/query -H 'content-type: application/json' \
+     -d '{"sequence":"MKTAYIAK","similarity_search":true}'               # 200; found:false or match_type:"similar"
 df -h /mnt/pgdata                                                        # still the volume
 ```
 
@@ -325,6 +336,13 @@ MAILTO=you@example.edu
 */5 * * * *  /opt/af3-cache/deploy/jetstream2/helpers/monitoring_watchdog.sh
 
 # 30 * * * *   /opt/af3-cache/deploy/jetstream2/helpers/reclassify.sh >> /mnt/pgdata/backups/reclassify.log 2>&1   # diamond only
+
+# MMseqs2 similarity snapshot builders (see "Similarity search" below). Safe to
+# install BEFORE flipping the flags: the API answers 409 and the helpers exit 0
+# quietly until SIMILARITY_NIGHTLY_BUILD_ENABLED / SIMILARITY_DELTA_BUILD_ENABLED
+# are true in .env.api.
+# 20 2 * * *   /opt/af3-cache/deploy/jetstream2/helpers/similarity_nightly.sh >> /mnt/pgdata/backups/similarity_nightly.log 2>&1
+# 50 * * * *   /opt/af3-cache/deploy/jetstream2/helpers/similarity_delta.sh   >> /mnt/pgdata/backups/similarity_delta.log 2>&1
 ```
 
 > **Do NOT schedule `POST /v1/admin/maintenance/run` (the mark-stale + reap job).**
@@ -482,6 +500,10 @@ What it adds beyond the DB-shaped metrics from postgres-exporter:
 | `af3cache_token_issue_total{result}` | `pelican token create` failing = no job can upload, while `/healthz` stays green |
 | `af3cache_classify_total{result}` | separates a genuine no-hit from diamond being broken — it returns UNCLASSIFIED on every failure path and never raises |
 | `af3cache_db_pool_checked_out` | vs 60 (pool_size 20 + max_overflow 40) |
+| `af3cache_similarity_total{result}` | `/v2/query` similarity outcomes: `hit`/`no_hit` are answers; `binary_missing`/`timeout`/`nonzero_exit`/`queue_timeout`/`db_missing` mean the deployment is broken. Exact-hit ratio above deliberately excludes these |
+| `af3cache_similarity_stage_seconds{stage}` | where an ephemeral request spends its time (`dump`, `createdb`, `createindex`, `search`) — the number that decides `SIMILARITY_EPHEMERAL_INDEX` and the move to snapshot mode |
+| `af3cache_similarity_inflight` | pinned at `SIMILARITY_MAX_CONCURRENT` = a hung mmseqs (the queue timeout covers the wait, not the search) |
+| `af3cache_similarity_build_total{build_type,result}` | nightly/delta builds by outcome once snapshot mode is enabled |
 
 > **Label cardinality is load-bearing.** Requests are labelled by route TEMPLATE
 > (`/v1/uploads/{ingestion_id}/complete`), never the raw path — there are 423k+
@@ -492,9 +514,25 @@ What it adds beyond the DB-shaped metrics from postgres-exporter:
 
 ### Running the test suite
 
-`tests/conftest.py` hardcodes `postgresql://af3:af3@localhost:5432`, which **on a
-deployed VM is the production database**. Never run pytest directly on the host.
-Use a throwaway Postgres in its own network namespace:
+`tests/conftest.py` defaults to `postgresql://af3:af3@localhost:5432`, which **on a
+deployed VM is the production database** (the password differs, so it fails
+rather than connects — but do not rely on that). Two safe options.
+
+**Option A — throwaway Postgres on another port** (fastest; runs the suite with
+the host's `uv`). `AF3_TEST_PG_HOST` / `AF3_TEST_PG_PORT` redirect the harness;
+production on 5432 is never addressed:
+
+```bash
+docker run -d --name af3cache-test-pg -p 127.0.0.1:5433:5432 \
+  -e POSTGRES_USER=af3 -e POSTGRES_PASSWORD=af3 -e POSTGRES_DB=af3cache postgres:16
+AF3_TEST_PG_PORT=5433 uv run pytest -q
+# the real-mmseqs integration tests are skipped unless a binary is reachable:
+SIMILARITY_MMSEQS_BINARY=$(docker run --rm --entrypoint sh af3cache-api -c 'command -v mmseqs') # inside the image
+SIMILARITY_MMSEQS_BINARY=/path/to/mmseqs AF3_TEST_PG_PORT=5433 uv run pytest -q tests/test_similarity_integration.py
+docker rm -f af3cache-test-pg
+```
+
+**Option B — everything inside a container network namespace:**
 
 ```bash
 docker run -d --name af3-pgtest -e POSTGRES_USER=af3 -e POSTGRES_PASSWORD=af3 \
@@ -568,3 +606,62 @@ disagree with this file, this file is right.
   `pelican://{namespace}/...` form the phase-1 doc quotes.
 - **Helper scripts** moved into `helpers/` and the docs into `docs/`; paths in
   the older files still point at the old locations.
+
+## Similarity search (MMseqs2) — modes and how to switch
+
+`POST /v2/query` with `"similarity_search": true` runs an MMseqs2 search over
+every sequence that has an **active** cache entry when the exact lookup misses.
+Everything lives under `app/services/similarity/`; the binary is baked into the
+image (Dockerfile `mmseqs` stage). Two target strategies, `SIMILARITY_DB_MODE`:
+
+| mode | what a request does | operations |
+|---|---|---|
+| `ephemeral` (default) | dumps the active table into a private `query_similarity_*` temp dir, `createdb` + `createindex`, searches, deletes the dir | none — but the whole table is rebuilt per request; keep `SIMILARITY_MAX_CONCURRENT=1` and `SIMILARITY_MMSEQS_SPLIT_MEMORY_LIMIT` set, watch `af3cache_similarity_stage_seconds` |
+| `snapshot` | searches the indexed nightly generation and the unindexed hot delta under `SIMILARITY_DB_ROOT`, merges, dedups | needs the two builders below on cron |
+
+**Measured on the production table, 2026-09-04** (597k active sequences,
+257 MB FASTA; 8-CPU VM; mmseqs 18-8cc5c, 4 threads, `--split-memory-limit 2G`):
+
+| stage | wall | peak RSS |
+|---|---|---|
+| dump (psql) | 1.8 s | — |
+| `createdb` | 2.1 s | 0.27 GB |
+| `createindex` | 31.3 s | **1.8 GB** (3.1 GB on disk) |
+| `search`, indexed | 0.33 s | 0.25 GB |
+| `search`, NO index | 0.31 s | 0.25 GB |
+
+Same 7 hits either way. For a single-query ephemeral search the precomputed
+index buys nothing and costs ~31 s plus 1.8 GB RAM per request — more than the
+api container's `mem_limit: 2g`. So in ephemeral mode either set
+`SIMILARITY_EPHEMERAL_INDEX=false` (request ≈ 5 s, ~0.3 GB) or raise
+`mem_limit` before enabling. The index pays off only in snapshot mode, where the
+nightly builds it once and every request reuses it.
+
+**Enabling snapshot mode** (all config; no code or schema change):
+
+1. Phase 5: `/mnt/pgdata/similarity` exists and is bind-mounted (`docker-compose.api.yml`).
+2. In `.env.api` set `SIMILARITY_NIGHTLY_BUILD_ENABLED=true` and
+   `SIMILARITY_DELTA_BUILD_ENABLED=true`; `docker compose -f docker-compose.api.yml up -d api`.
+3. Run the nightly ONCE by hand and check it: `helpers/similarity_nightly.sh`,
+   then `curl -sk https://$H/v1/admin/similarity/status -H "X-API-Key: $ADM"`
+   shows `nightly.generation` and `nightly.indexed: true`.
+4. Run `helpers/similarity_delta.sh` once (an empty delta is fine).
+5. Uncomment the two cron lines in Phase 9.
+6. Set `SIMILARITY_DB_MODE=snapshot` in `.env.api` and restart `api`.
+   Flipping back is `SIMILARITY_DB_MODE=ephemeral` + restart.
+
+How the snapshot generations behave: every build writes a NEW immutable dir
+(`nightly-build-<ts>-DB/`, `delta-<ts>-DB/`) with `targetDB*` and a
+`manifest.json` (Postgres high-water mark + snapshot time captured in the same
+repeatable-read transaction as the dump), then atomically swaps the
+`nightly-buildDB` / `deltaDB` symlink. A failed build leaves the active symlink
+untouched. The delta is always a FULL rebuild of everything newer than the
+**active nightly's** manifest (never "since the last delta"), so a new nightly
+automatically shrinks the next delta to zero. Old generations are deleted only
+after `SIMILARITY_*_RETENTION_MINUTES` (default 60) and never while they are the
+active target, so in-flight requests that resolved the old symlink finish
+safely. Requests resolve both symlinks once, up front.
+
+Kill switches: `SIMILARITY_SEARCH_ENABLED=false` makes opted-in requests return
+409 `similarity_disabled` (exact lookups unaffected); the builders answer 409
+`similarity_build_disabled` while their flags are false.

@@ -13,6 +13,8 @@ from app.api import (
     routes_health,
     routes_ingestion,
     routes_query,
+    routes_query_v2,
+    routes_similarity_admin,
     routes_stats,
 )
 
@@ -20,5 +22,7 @@ api_router = APIRouter()
 api_router.include_router(routes_health.router)
 api_router.include_router(routes_stats.router)  # public, no auth
 api_router.include_router(routes_query.router)
+api_router.include_router(routes_query_v2.router)  # public; v1 + similarity opt-in
 api_router.include_router(routes_ingestion.router)
 api_router.include_router(routes_admin.router)
+api_router.include_router(routes_similarity_admin.router)

@@ -18,6 +18,11 @@ services:
         # pelican CLI baked into the image by the Dockerfile's `pelican` stage.
         # Bump here to upgrade, then rebuild `api` (and `migrate`).
         PELICAN_VERSION: "7.25.0"
+        # MMseqs2 baked in by the Dockerfile's `mmseqs` stage for the /v2/query
+        # similarity search. The release publishes no checksum file, so the
+        # asset sha256 is pinned alongside the version; bump BOTH together.
+        MMSEQS_VERSION: "18-8cc5c"
+        MMSEQS_SHA256: "bd9b0234da5949ad528d5b5f9ea4cda9c1e23dce14b46c0791d4d919a76e61ce"
     restart: unless-stopped
     env_file:
       - ./.env.prod        # DATABASE_URL (host `db`), DB creds
@@ -46,6 +51,13 @@ services:
       # *credentials* are mounted (secrets never go in the image); the container
       # runs as root, so pelican reads them from $HOME=/root:
       - /home/exouser/.config/pelican:/root/.config/pelican:ro
+      # SIMILARITY_DB_ROOT (snapshot mode): nightly/delta mmseqs generations,
+      # manifests and the two active symlinks. Lives on the data volume, NOT
+      # the root disk, and is rw because the API writes generations there.
+      # The host dir MUST exist (`sudo mkdir -p /mnt/pgdata/similarity`);
+      # unused while SIMILARITY_DB_MODE=ephemeral. Atomic symlink promotion
+      # relies on everything under it being one filesystem.
+      - /mnt/pgdata/similarity:/var/lib/af3cache/similarity
     healthcheck:
       test: ["CMD", "python", "-c",
               "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else sys.exit(1)"]

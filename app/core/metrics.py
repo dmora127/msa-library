@@ -142,6 +142,50 @@ CLASSIFY_SECONDS = Histogram(
     buckets=(0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 40, 60),
 )
 
+# --- similarity search (mmseqs2) --------------------------------------------
+# The exact-match hit ratio above deliberately does NOT count similarity hits;
+# this is where they show up. `result` separates a genuine no-neighbour answer
+# from a broken deployment (binary missing / timeout / queue full).
+SIMILARITY = Counter(
+    "af3cache_similarity_total",
+    "Similarity searches by outcome.",
+    ["result"],  # hit | no_hit | empty_targets | disabled | queue_timeout
+                 # | binary_missing | timeout | nonzero_exit | parse_error
+                 # | db_missing
+)
+SIMILARITY_SECONDS = Histogram(
+    "af3cache_similarity_seconds",
+    "End-to-end duration of one similarity search (incl. ephemeral build).",
+    buckets=_FETCH_BUCKETS,
+)
+SIMILARITY_STAGE_SECONDS = Histogram(
+    "af3cache_similarity_stage_seconds",
+    "Duration of one mmseqs/dump stage inside a similarity search or build.",
+    ["stage"],  # dump | createdb | createindex | search | convertalis | version
+    buckets=_FETCH_BUCKETS,
+)
+# Same rationale as OSDF_INFLIGHT/OSDF_WAITING: the queue timeout covers only
+# the semaphore acquire, so a hung mmseqs pins inflight at max_concurrent.
+SIMILARITY_INFLIGHT = Gauge(
+    "af3cache_similarity_inflight",
+    "Similarity searches currently running (compare against max_concurrent).",
+)
+SIMILARITY_WAITING = Gauge(
+    "af3cache_similarity_waiting",
+    "Callers queued waiting for a similarity slot.",
+)
+SIMILARITY_BUILD = Counter(
+    "af3cache_similarity_build_total",
+    "Nightly/delta similarity database builds by outcome.",
+    ["build_type", "result"],  # ok | failed | disabled | in_progress
+)
+SIMILARITY_BUILD_SECONDS = Histogram(
+    "af3cache_similarity_build_seconds",
+    "Duration of a nightly/delta similarity database build.",
+    ["build_type"],
+    buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600),
+)
+
 
 def _safe(fn):
     """Wrap a recorder so instrumentation can never raise into a request path."""
@@ -192,6 +236,27 @@ def record_classify(result: str, seconds: float | None = None) -> None:
     CLASSIFY.labels(result=result).inc()
     if seconds is not None:
         CLASSIFY_SECONDS.observe(seconds)
+
+
+@_safe
+def record_similarity(result: str, seconds: float | None = None) -> None:
+    SIMILARITY.labels(result=result).inc()
+    if seconds is not None:
+        SIMILARITY_SECONDS.observe(seconds)
+
+
+@_safe
+def record_similarity_stage(stage: str, seconds: float) -> None:
+    SIMILARITY_STAGE_SECONDS.labels(stage=stage).observe(seconds)
+
+
+@_safe
+def record_similarity_build(
+    build_type: str, result: str, seconds: float | None = None
+) -> None:
+    SIMILARITY_BUILD.labels(build_type=build_type, result=result).inc()
+    if seconds is not None:
+        SIMILARITY_BUILD_SECONDS.labels(build_type=build_type).observe(seconds)
 
 
 class DbPoolCollector:

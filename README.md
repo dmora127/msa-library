@@ -22,7 +22,8 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
                           │
                           ├─ TokenIssuer   (pelican token create; local/stub/oauth2)
                           ├─ OsdfClient    (pelican CLI; stub in tests)
-                          └─ A3mValidator  (lenient .a3m sniff)
+                          ├─ A3mValidator  (lenient .a3m sniff)
+                          └─ SimilarityService (mmseqs2; ephemeral | snapshot targets)
 ```
 
 - `POST /v1/query` — sequence/hash → cached hits (OSDF URL + metadata) or
@@ -41,6 +42,22 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
   (query visibility; the community source's flag also gates job uploads).
 - `POST /v1/admin/maintenance/run` — idle sweep + reaper (cron/scheduler hits
   this). Admin-key gated.
+- `POST /v2/query` — **experimental**: `/v1/query` plus an opt-in
+  `"similarity_search": true`. On an exact miss it runs an MMseqs2 search over
+  every sequence with an active cache entry and returns near-identical
+  neighbours (identity ≥ 90 %, query AND target coverage ≥ 0.9 by default)
+  through the same metadata path. Similar results carry `match_type:
+  "similar"` and a per-hit `similarity` block (`percent_identity` 0–100,
+  `query_coverage`/`target_coverage` 0–1, alignment/query/target lengths,
+  bitscore, evalue); `hit.seq_hash` is the neighbour's, `result.seq_hash` the
+  query's. Exact hits gain only `match_type: "exact"`; misses are byte-identical
+  to v1. Batch `seq_hashes` + the flag → 422. Merged back into v1 once proven.
+- `GET /v1/admin/similarity/status`, `POST /v1/admin/similarity/nightly-build`,
+  `POST /v1/admin/similarity/delta-refresh` — snapshot-mode target builders
+  (indexed nightly generation + hot delta, atomic symlink promotion, retention).
+  Implemented but **disabled** until `SIMILARITY_*_BUILD_ENABLED=true`; host
+  cron drives them (`deploy/jetstream2/helpers/similarity_*.sh`). The default
+  `SIMILARITY_DB_MODE=ephemeral` rebuilds the target per request instead.
 - `GET /healthz` — DB ping, no auth.
 
 ### Retention & identity
@@ -183,7 +200,10 @@ See `.env.example`. Key vars: `DATABASE_URL`, `API_KEYS` (comma-separated set,
 rotation-friendly), `ADMIN_API_KEY`, `TOKEN_ISSUER_IMPL`, `OSDF_CLIENT_IMPL`,
 `MAX_UPLOAD_SIZE_BYTES`, `TOKEN_TTL_SECONDS` (1200), `OSDF_NAMESPACE_TEMPLATE`,
 `PELICAN_STORE_NAMESPACES`, `PELICAN_TOKEN_BINARY`,
-`REAP_GRACE_HOURS`, `ACCESS_BUMP_GRANULARITY_SECONDS`. Source enablement is not
+`REAP_GRACE_HOURS`, `ACCESS_BUMP_GRANULARITY_SECONDS`, and the
+`SIMILARITY_*` group (`SIMILARITY_DB_MODE`, thresholds, `SIMILARITY_DB_ROOT`,
+`SIMILARITY_MMSEQS_*`, `SIMILARITY_MAX_CONCURRENT`, the two `*_BUILD_ENABLED`
+flags) documented in `.env.example`. Source enablement is not
 a setting — it's `msa_sources.enabled`, managed via `GET|PUT /v1/admin/sources`
 (query honors it; the community source must be enabled for jobs to upload).
 Env is the floor; `app_settings` rows (via `/v1/admin/config`)

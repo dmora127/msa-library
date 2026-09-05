@@ -13,7 +13,9 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.30",
     "alembic>=1.14",
-    "pydantic>=2.9",
+    # >=2.12 for Field(exclude_if=...), used by the /v2/query schemas to omit
+    # similarity-only keys from exact-hit responses.
+    "pydantic>=2.12",
     "pydantic-settings>=2.6",
     "pyjwt[crypto]>=2.10",
     "httpx>=0.28",

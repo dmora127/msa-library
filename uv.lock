@@ -34,7 +34,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "prometheus-client", specifier = ">=0.21" },
-    { name = "pydantic", specifier = ">=2.9" },
+    { name = "pydantic", specifier = ">=2.12" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },

@@ -98,6 +98,52 @@ class Settings(BaseSettings):
     diamond_query_cover: float = 100.0
     diamond_evalue_threshold: float = 0.0005
 
+    # --- MMseqs2 similarity search (POST /v2/query similarity_search=true) ---
+    # Opt-in neighbour lookup after an exact miss. All env-only (no
+    # app_settings override). See app/services/similarity/.
+    similarity_search_enabled: bool = True
+    # ephemeral: dump msa_sequences + build + index + search per request, then
+    #            delete the workspace (active by default).
+    # snapshot:  search the indexed nightly generation + the unindexed hot delta
+    #            under similarity_db_root (built by the admin build endpoints).
+    similarity_db_mode: str = "ephemeral"
+    similarity_db_root: str = "/var/lib/af3cache/similarity"
+    # Parent for per-request ephemeral workspaces; None = system temp dir.
+    similarity_tmp_root: str | None = None
+    # Run `mmseqs createindex` on the per-request ephemeral target. Spec
+    # default; flip to false if benchmarks show search-time indexing is cheaper
+    # at the current table size.
+    similarity_ephemeral_index: bool = True
+    similarity_mmseqs_binary: str = "mmseqs"
+    similarity_mmseqs_threads: int = 4
+    similarity_mmseqs_prefilter_mode: int = 1
+    similarity_mmseqs_alignment_mode: int = 3
+    similarity_mmseqs_max_candidates: int = 300  # --max-seqs
+    # Passed to createindex + search when set (e.g. "1G"); bounds mmseqs RAM
+    # inside the container's mem_limit.
+    similarity_mmseqs_split_memory_limit: str | None = None
+    similarity_mmseqs_timeout_seconds: float = 300.0  # per step, request path
+    similarity_build_timeout_seconds: float = 3600.0  # per step, builders
+    # Thresholds a hit must meet. Identity is 0-100, coverages are 0-1 and are
+    # enforced SEPARATELY (query->target and target->query).
+    similarity_min_percent_identity: float = 90.0
+    similarity_min_query_coverage: float = 0.9
+    similarity_min_target_coverage: float = 0.9
+    similarity_max_hits: int = 5
+    # Bounded concurrency for similarity searches (each ephemeral search dumps
+    # the whole active table and runs mmseqs). A semaphore, not a lock:
+    # workspaces stay independent. Excess callers wait up to the queue timeout
+    # then get 503 similarity_unavailable. 0 = unlimited.
+    similarity_max_concurrent: int = 4
+    similarity_queue_timeout_seconds: float = 30.0
+    # Snapshot-mode builders. Both DISABLED by default; the admin endpoints
+    # return 409 similarity_build_disabled until these are true.
+    similarity_nightly_build_enabled: bool = False
+    similarity_nightly_retention_minutes: int = 60
+    similarity_delta_build_enabled: bool = False
+    similarity_delta_refresh_minutes: int = 60  # cron cadence; reported by /status
+    similarity_delta_retention_minutes: int = 60
+
     # Adjustable operational defaults (overridable via app_settings)
     max_upload_size_bytes: int = 104_857_600
     token_ttl_seconds: int = 1200

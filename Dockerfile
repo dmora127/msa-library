@@ -20,6 +20,29 @@ RUN set -eux; \
     rm -f "$asset" checksums.txt; \
     ./pelican --version
 
+# --- MMseqs2 ----------------------------------------------------------------
+# Static build from the upstream GitHub release, for the /v2/query similarity
+# search (app/services/similarity). The release ships NO checksum file, so the
+# asset's sha256 is pinned here (MMSEQS_SHA256); when bumping MMSEQS_VERSION,
+# download the new asset, `sha256sum` it, and update both ARGs together. An
+# empty MMSEQS_SHA256 skips verification (dev only). `mmseqs version` prints
+# the build's git commit, not the release tag.
+FROM debian:12-slim AS mmseqs
+ARG MMSEQS_VERSION=18-8cc5c
+ARG MMSEQS_ARCH=avx2
+ARG MMSEQS_SHA256=bd9b0234da5949ad528d5b5f9ea4cda9c1e23dce14b46c0791d4d919a76e61ce
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /out
+RUN set -eux; \
+    asset="mmseqs-linux-${MMSEQS_ARCH}.tar.gz"; \
+    curl -fsSL -O "https://github.com/soedinglab/MMseqs2/releases/download/${MMSEQS_VERSION}/${asset}"; \
+    if [ -n "${MMSEQS_SHA256}" ]; then echo "${MMSEQS_SHA256}  ${asset}" | sha256sum -c -; fi; \
+    tar -xzf "$asset" --strip-components=2 mmseqs/bin/mmseqs; \
+    rm -f "$asset"; \
+    ./mmseqs version
+
 FROM python:3.12-slim
 
 # uv for fast, reproducible installs
@@ -29,6 +52,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # `pelican object get|rm` (OSDF_CLIENT_IMPL=pelican) run from inside the
 # container. Credentials stay OUT of the image — mounted at runtime.
 COPY --from=pelican /out/pelican /usr/local/bin/pelican
+
+# mmseqs: similarity search target build + search (SIMILARITY_MMSEQS_BINARY).
+COPY --from=mmseqs /out/mmseqs /usr/local/bin/mmseqs
 
 WORKDIR /app
 

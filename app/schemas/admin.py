@@ -173,3 +173,48 @@ class AdminIngestRequest(BaseModel):
         if self.molecule_type not in ("protein", "rna", "dna"):
             raise ValueError("molecule_type must be protein|rna|dna")
         return self
+
+
+# --- similarity (mmseqs2) admin ---------------------------------------------
+
+
+class SimilarityManifestInfo(BaseModel):
+    """manifest.json of a published nightly/delta generation, plus where it
+    lives on disk."""
+
+    build_type: str
+    generation: str
+    generation_path: str
+    created_at: str
+    snapshot_taken_at: str
+    postgres_high_water_mark: int
+    sequence_count: int
+    residue_count: int
+    indexed: bool
+    mmseqs_version: str
+    app_git_commit: str | None = None
+    target_filter: str = "active_cache_entries"
+    base_nightly_generation: str | None = None
+    base_high_water_mark: int | None = None
+    base_snapshot_taken_at: str | None = None
+
+
+class SimilarityStatusResponse(BaseModel):
+    search_enabled: bool
+    db_mode: str
+    db_root: str
+    nightly_build_enabled: bool
+    delta_build_enabled: bool
+    delta_refresh_minutes: int
+    mmseqs_binary: str
+    mmseqs_version: str | None  # None when the binary is missing/broken
+    thresholds: dict[str, float | int]
+    nightly: SimilarityManifestInfo | None
+    delta: SimilarityManifestInfo | None
+    build_in_progress: bool
+
+
+class SimilarityBuildResponse(BaseModel):
+    manifest: SimilarityManifestInfo
+    elapsed_seconds: float
+    retired: list[str]  # generation dirs removed by retention after promotion

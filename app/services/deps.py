@@ -20,6 +20,12 @@ from app.services.maintenance_service import MaintenanceService
 from app.services.osdf_client import OsdfClient, build_osdf_client
 from app.services.sequence_service import SequenceService
 from app.services.settings_service import SettingsService
+from app.services.similarity import (
+    SimilarityRuntime,
+    SimilarityService,
+    SimilarityServiceBase,
+    build_similarity_config,
+)
 from app.services.token_issuer import TokenIssuer, build_token_issuer
 
 
@@ -59,6 +65,19 @@ def get_a3m_validator() -> A3mValidator:
 @lru_cache
 def get_classifier() -> Classifier:
     return build_classifier(get_settings())
+
+
+@lru_cache
+def get_similarity_runtime() -> SimilarityRuntime:
+    """Process-singleton: holds the request semaphore and the build lock."""
+    return SimilarityRuntime(build_similarity_config(get_settings()))
+
+
+def get_similarity_service(
+    session: AsyncSession = Depends(get_session),
+    runtime: SimilarityRuntime = Depends(get_similarity_runtime),
+) -> SimilarityServiceBase:
+    return SimilarityService(session, runtime)
 
 
 def get_ingestion_service(
