@@ -463,11 +463,30 @@ Setup, once per instance:
    GRANT CONNECT ON DATABASE af3cache TO af3_exporter;
    GRANT USAGE ON SCHEMA public TO af3_exporter;
    GRANT SELECT ON public.msa_cache_entries, public.msa_ingestions,
-                   public.msa_sources, public.query_metrics TO af3_exporter;
+                   public.msa_sources, public.query_metrics,
+                   public.reclass_jobs TO af3_exporter;
    CREATE POLICY exporter_read_cache_entries ON public.msa_cache_entries
      FOR SELECT TO af3_exporter USING (true);
-   -- ...repeat for msa_ingestions, msa_sources, query_metrics
+   -- ...repeat for msa_ingestions, msa_sources, query_metrics, reclass_jobs
    ```
+   Every new RLS-enabled table the exporter reads needs BOTH lines again. When
+   `reclass_jobs` (migration 0015) was added to an existing instance the pair was:
+   ```sql
+   GRANT SELECT ON public.reclass_jobs TO af3_exporter;
+   CREATE POLICY exporter_read_reclass_jobs ON public.reclass_jobs
+     FOR SELECT TO af3_exporter USING (true);
+   ```
+   `monitoring/postgres_queries.yaml` is read once at exporter start: after
+   editing it, recreate only the exporter (same three compose files as the
+   stack, `--no-deps` so db/api are not touched):
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.api.yml -f docker-compose.monitoring.yml \
+                  up -d --no-deps --force-recreate postgres-exporter
+   ```
+   Grafana re-reads `monitoring/grafana/dashboards/*.json` every 30 s
+   (`updateIntervalSeconds`), so dashboard edits need no restart -- but they
+   **overwrite any change made in the Grafana UI** to that dashboard
+   (`allowUiUpdates: true` only lets you save; the file wins on the next change).
 3. Add `GRAFANA_PROXY_USER` / `GRAFANA_PROXY_HASH` to `.env.api`
    (`docker run --rm caddy:2 caddy hash-password --plaintext '<pw>'`), then
    **recreate Caddy** — see the warning below.
@@ -738,6 +757,12 @@ EXTRA_QUERY=limit=50 helpers/reclassify_export.sh          # small real job; pri
 helpers/reclassify_poll.sh                                 # repeat every few minutes until DONE
 curl -sk "https://$H/v1/admin/classification/jobs" -H "X-API-Key: $ADM" | python3 -m json.tool | head -40
 ```
+
+Grafana's "Classification (NR-BLAST reclassification)" row shows the
+classified / pending / unclassified split of ACTIVE entries (percent and count)
+and the active / failed job counts, from the `af3cache_classification_count`
+and `af3cache_reclass_jobs_count` gauges in `monitoring/postgres_queries.yaml`
+(both need the Phase 10 exporter grants).
 
 Then uncomment the two cron lines in Phase 9. Logs:
 `/mnt/pgdata/backups/reclassify_export.log`, `…/reclassify_poll.log`, the

@@ -74,3 +74,34 @@ af3cache_a3m:
     - source:  { usage: "LABEL", description: "MSA source" }
     - bytes:   { usage: "GAUGE", description: "bytes of a3m objects held on OSDF (active + held)" }
     - entries: { usage: "GAUGE", description: "active+held entries contributing to that total" }
+
+# Classification state of cache entries, for the NR-BLAST reclassification
+# pipeline (docs/redeploy.md, "Reclassification export"). `pending` = the
+# sentinel job uploads carry in BOTH fields until the remote BLAST run posts a
+# label; `unclassified` = either field 'Unclassified' (outside that pipeline's
+# scope); everything else = `classified`. Same full scan as af3cache_entries
+# (~100 ms warm). The dashboard's "Classification" row divides by the active
+# total for the percentages.
+af3cache_classification:
+  query: >
+    select status::text as status,
+           case when species = 'Pending Classification'
+                 and query_name = 'Pending Classification' then 'pending'
+                when species = 'Unclassified' or query_name = 'Unclassified' then 'unclassified'
+                else 'classified' end as state,
+           count(*) as count
+    from public.msa_cache_entries
+    group by 1, 2
+  metrics:
+    - status: { usage: "LABEL", description: "entry status (active | stale | held)" }
+    - state:  { usage: "LABEL", description: "pending | unclassified | classified" }
+    - count:  { usage: "GAUGE", description: "cache entries by classification state" }
+
+# Remote NR-BLAST jobs recorded in reclass_jobs. Needs SELECT + an RLS policy
+# for af3_exporter (Phase 10 grants). QUEUED/RUNNING = the poller is active.
+# A status with no rows has no series: dashboard panels use `or vector(0)`.
+af3cache_reclass_jobs:
+  query: "select status as status, count(*) as count from public.reclass_jobs group by 1"
+  metrics:
+    - status: { usage: "LABEL", description: "QUEUED | RUNNING | DONE | FAILED | KILLED | UNKNOWN" }
+    - count:  { usage: "GAUGE", description: "reclassification jobs by status" }

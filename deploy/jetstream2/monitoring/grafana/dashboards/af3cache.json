@@ -6,7 +6,7 @@
   ],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 11,
+  "version": 12,
   "refresh": "1s",
   "time": {
     "from": "now-6h",
@@ -2258,6 +2258,606 @@
       }
     },
     {
+      "id": 50,
+      "type": "row",
+      "title": "Classification (NR-BLAST reclassification)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "panels": []
+    },
+    {
+      "id": 51,
+      "type": "stat",
+      "title": "Classified (active entries)",
+      "description": "Share of ACTIVE cache entries with a real species + protein name. The rest are 'Pending Classification' (waiting on the NR-BLAST box) or 'Unclassified'.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 60
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum(af3cache_classification_count{state=\"classified\",status=\"active\"}) / sum(af3cache_classification_count{status=\"active\"})",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 70
+              },
+              {
+                "color": "green",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 52,
+      "type": "stat",
+      "title": "Pending classification (%)",
+      "description": "ACTIVE entries still carrying the 'Pending Classification' sentinel in both fields -- exactly the set helpers/reclassify_export.sh ships nightly (minus those under RECLASS_EXPORT_MIN_LENGTH aa). Should trend down while jobs post results.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 60
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum(af3cache_classification_count{state=\"pending\",status=\"active\"}) / sum(af3cache_classification_count{status=\"active\"})",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 53,
+      "type": "stat",
+      "title": "Pending entries",
+      "description": "Count behind the percentage. Re-ingesting a sequence re-arms the sentinel, so this never reaches zero while uploads keep arriving.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 60
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_classification_count{state=\"pending\",status=\"active\"})",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 54,
+      "type": "stat",
+      "title": "Unclassified (active)",
+      "description": "Either field literally 'Unclassified'. NOT part of the NR-BLAST pipeline (its callback only updates both-pending rows); mostly rows with a known species but no protein name.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 60
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_classification_count{state=\"unclassified\",status=\"active\"})",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 55,
+      "type": "stat",
+      "title": "Reclass jobs active",
+      "description": "reclass_jobs rows QUEUED or RUNNING on the BLAST box. >0 means reclassify_poll.sh is polling every 10 min; 0 means it exits without opening ssh.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 60
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_reclass_jobs_count{status=~\"QUEUED|RUNNING\"}) or vector(0)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 56,
+      "type": "stat",
+      "title": "Reclass jobs failed",
+      "description": "FAILED + KILLED + UNKNOWN jobs, all time. The reason is in reclass_jobs.last_status.log_tail (GET /v1/admin/classification/jobs).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 60
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum(af3cache_reclass_jobs_count{status=~\"FAILED|KILLED|UNKNOWN\"}) or vector(0)",
+          "legendFormat": "__auto",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 57,
+      "type": "timeseries",
+      "title": "Classification state (% of active entries)",
+      "description": "Stacked to 100%: classified vs pending vs unclassified. Watch pending fall after each nightly job; a step up is a bulk ingest arriving.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "100 * sum by (state)(af3cache_classification_count{status=\"active\"}) / ignoring(state) group_left sum(af3cache_classification_count{status=\"active\"})",
+          "legendFormat": "{{state}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 35,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "classified"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pending"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unclassified"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8e8e8e"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 58,
+      "type": "timeseries",
+      "title": "Pending / unclassified entries (count)",
+      "description": "The absolute backlog the NR-BLAST pipeline works through. Each DONE job should show as a drop in `pending`; the slope between jobs is the upload rate.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (state)(af3cache_classification_count{state=~\"pending|unclassified\",status=\"active\"})",
+          "legendFormat": "{{state}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pending"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unclassified"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8e8e8e"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "id": 39,
       "type": "row",
       "title": "Capacity",
@@ -2266,7 +2866,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 72
       },
       "panels": []
     },
@@ -2283,7 +2883,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 73
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -2349,7 +2949,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 73
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -2415,7 +3015,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 67
+        "y": 80
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -2481,7 +3081,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 67
+        "y": 80
       },
       "maxDataPoints": 1000,
       "targets": [
@@ -2543,7 +3143,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 87
       },
       "panels": []
     },
@@ -2560,7 +3160,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 75
+        "y": 88
       },
       "targets": [
         {
@@ -2619,7 +3219,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 75
+        "y": 88
       },
       "targets": [
         {
@@ -2674,7 +3274,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 96
       },
       "panels": []
     },
@@ -2691,7 +3291,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 84
+        "y": 97
       },
       "targets": [
         {
@@ -2750,7 +3350,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 84
+        "y": 97
       },
       "targets": [
         {
