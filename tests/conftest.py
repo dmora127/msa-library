@@ -22,8 +22,16 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 TEST_DB = "af3cache_test"
-_ADMIN_DSN = "postgresql://af3:af3@localhost:5432/postgres"
-TEST_DATABASE_URL = f"postgresql+asyncpg://af3:af3@localhost:5432/{TEST_DB}"
+# Host/port of the docker-compose test Postgres. Overridable so the suite can
+# run on a box where 5432 is already taken (e.g. the production VM, where the
+# prod db is bound to 127.0.0.1:5432 with a different password):
+#   docker run -d --name af3cache-test-pg -p 127.0.0.1:5433:5432 \
+#     -e POSTGRES_USER=af3 -e POSTGRES_PASSWORD=af3 -e POSTGRES_DB=af3cache postgres:16
+#   AF3_TEST_PG_PORT=5433 uv run pytest -q
+_PG_HOST = os.environ.get("AF3_TEST_PG_HOST", "localhost")
+_PG_PORT = os.environ.get("AF3_TEST_PG_PORT", "5432")
+_ADMIN_DSN = f"postgresql://af3:af3@{_PG_HOST}:{_PG_PORT}/postgres"
+TEST_DATABASE_URL = f"postgresql+asyncpg://af3:af3@{_PG_HOST}:{_PG_PORT}/{TEST_DB}"
 
 # Inbound-JWT test config. A single ES256 (P-256) keypair is generated once per
 # session; its PUBLIC half is written to a temp PEM that the app loads as the

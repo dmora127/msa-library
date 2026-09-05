@@ -35,3 +35,9 @@ tok.en
 
 # ...but the committed templates are not secrets
 !*.example
+
+# bulk FASTA exports dropped in the repo root (nightly_library_build.fa,
+# sequences.fasta): hundreds of MB, never to be committed. Root-only pattern so
+# small fixtures under tests/ stay committable.
+/*.fa
+/*.fasta
