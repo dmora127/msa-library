@@ -290,3 +290,28 @@ class ReclassJobOut(BaseModel):
     last_polled_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class ReclassSubmitRequest(BaseModel):
+    """POST /v1/admin/classification/jobs/submit body (all optional)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_length: int | None = Field(default=None, ge=1)  # default: RECLASS_EXPORT_MIN_LENGTH
+    max_length: int | None = Field(default=None, ge=1)
+    limit: int | None = Field(default=None, ge=1)
+
+
+class ReclassPolledJob(BaseModel):
+    previous_status: str
+    job: ReclassJobOut
+
+
+class ReclassPollFailure(BaseModel):
+    job_id: str
+    error: str
+
+
+class ReclassPollResponse(BaseModel):
+    polled: list[ReclassPolledJob]
+    failed: list[ReclassPollFailure]

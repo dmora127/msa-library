@@ -51,6 +51,14 @@ services:
       # *credentials* are mounted (secrets never go in the image); the container
       # runs as root, so pelican reads them from $HOME=/root:
       - /home/exouser/.config/pelican:/root/.config/pelican:ro
+      # NR-BLAST reclassification (POST /v1/admin/classification/jobs/submit
+      # and /poll): the api scp/ssh's to the BLAST box with a DEDICATED deploy
+      # key and a pinned known_hosts, both read-only. Generate + register them
+      # per docs/redeploy.md "Reclassification export" BEFORE `up`: a missing
+      # host file makes Docker create an empty directory in its place. Match
+      # RECLASS_SSH_KEY_FILE / RECLASS_KNOWN_HOSTS_FILE in .env.api.
+      - /home/exouser/.ssh/reclass_ed25519:/keys/reclass_ed25519:ro
+      - /home/exouser/.ssh/reclass_known_hosts:/keys/reclass_known_hosts:ro
       # SIMILARITY_DB_ROOT (snapshot mode): nightly/delta mmseqs generations,
       # manifests and the two active symlinks. Lives on the data volume, NOT
       # the root disk, and is rw because the API writes generations there.

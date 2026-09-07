@@ -18,6 +18,7 @@ from app.services.classifier import Classifier, build_classifier
 from app.services.ingestion_service import IngestionService
 from app.services.maintenance_service import MaintenanceService
 from app.services.osdf_client import OsdfClient, build_osdf_client
+from app.services.reclass_pipeline import ReclassRuntime, build_reclass_runtime
 from app.services.sequence_service import SequenceService
 from app.services.settings_service import SettingsService
 from app.services.similarity import (
@@ -65,6 +66,12 @@ def get_a3m_validator() -> A3mValidator:
 @lru_cache
 def get_classifier() -> Classifier:
     return build_classifier(get_settings())
+
+
+@lru_cache
+def get_reclass_runtime() -> ReclassRuntime:
+    """Process-singleton: ssh/scp client for the NR-BLAST box + submit lock."""
+    return build_reclass_runtime(get_settings())
 
 
 @lru_cache

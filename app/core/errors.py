@@ -121,6 +121,28 @@ class ReclassJobNotFound(AppError):
     code = "reclass_job_not_found"
 
 
+class ReclassRemoteUnavailable(AppError):
+    """ssh/scp to the NR-BLAST box failed, or its tools returned something we
+    cannot use. Nothing was recorded; the caller may retry."""
+
+    status_code = 503
+    code = "reclass_remote_unavailable"
+
+
+class ReclassSubmitInProgress(AppError):
+    """Another POST .../jobs/submit holds the process-level submit lock."""
+
+    status_code = 409
+    code = "reclass_submit_in_progress"
+
+
+class ReclassNothingPending(AppError):
+    """The export matched zero sequences, so no job was submitted."""
+
+    status_code = 409
+    code = "reclass_nothing_pending"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _handle(_: Request, exc: AppError) -> JSONResponse:

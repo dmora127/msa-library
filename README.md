@@ -58,15 +58,18 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
   Implemented but **disabled** until `SIMILARITY_*_BUILD_ENABLED=true`; host
   cron drives them (`deploy/jetstream2/helpers/similarity_*.sh`). The default
   `SIMILARITY_DB_MODE=ephemeral` rebuilds the target per request instead.
-- `GET /v1/admin/classification/pending.fa` — FASTA (`>{sequence_id}|{seq_hash}`)
-  of every sequence with an active entry still marked `Pending Classification`
-  (≥ `RECLASS_EXPORT_MIN_LENGTH` aa; `?min_length=`, `?max_length=`, `?limit=`).
-  `helpers/reclassify_export.sh` ships it nightly to the NR BLAST box and
-  records the remote job id via `POST /v1/admin/classification/jobs`;
-  `helpers/reclassify_poll.sh` stores each remote `reclass-status` JSON via
-  `PUT /v1/admin/classification/jobs/{id}/status` while a job is
-  QUEUED/RUNNING (`GET …/jobs?active=true`). Results arrive per sequence through
-  `POST /v1/admin/reclassify`.
+- `POST /v1/admin/classification/jobs/submit` — NR-BLAST reclassification
+  hand-off, on demand or from cron: exports every sequence with an active entry
+  still marked `Pending Classification` (≥ `RECLASS_EXPORT_MIN_LENGTH` aa;
+  body `{min_length?, max_length?, limit?}`), scp's it to the BLAST box, runs
+  `reclass-submit` there over ssh and records the job. `POST …/jobs/poll`
+  stores `reclass-status` for every QUEUED/RUNNING job (no ssh when none is
+  active); `GET …/jobs[?active=true]` lists them;
+  `GET …/pending.fa` is the export alone (`>{sequence_id}|{seq_hash}`).
+  Results come back per sequence through `POST /v1/admin/reclassify`. The
+  container needs the dedicated deploy key + pinned known_hosts mounts from
+  `docker-compose.api.yml`; `helpers/reclassify_{export,poll}.sh` are curl
+  wrappers for cron.
 - `GET /healthz` — DB ping, no auth.
 
 ### Retention & identity

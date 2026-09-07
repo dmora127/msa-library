@@ -26,9 +26,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin_key
 from app.db.session import get_session
-from app.schemas.admin import ReclassJobCreate, ReclassJobOut, ReclassRemoteStatus
+from app.schemas.admin import (
+    ReclassJobCreate,
+    ReclassJobOut,
+    ReclassPolledJob,
+    ReclassPollFailure,
+    ReclassPollResponse,
+    ReclassRemoteStatus,
+    ReclassSubmitRequest,
+)
 from app.services import reclass_jobs
 from app.services.classification_export import count_pending, iter_pending_fasta
+from app.services.deps import get_reclass_runtime
+from app.services.reclass_pipeline import (
+    ReclassRuntime,
+    poll_active_jobs,
+    poll_job,
+    submit_pending_job,
+)
 
 router = APIRouter(
     prefix="/v1/admin/classification",
@@ -74,6 +89,56 @@ async def export_pending_fasta(
         media_type="text/x-fasta",
         headers=headers,
     )
+
+
+@router.post("/jobs/submit", response_model=ReclassJobOut, status_code=201)
+async def submit_reclass_job(
+    body: ReclassSubmitRequest | None = None,
+    session: AsyncSession = Depends(get_session),
+    rt: ReclassRuntime = Depends(get_reclass_runtime),
+    settings: Settings = Depends(get_settings),
+) -> ReclassJobOut:
+    """On-demand hand-off: export the pending set, scp it to the BLAST box's
+    inbox, run `reclass-submit`, record the job (QUEUED) and return it.
+    Synchronous (tens of seconds). 409 reclass_nothing_pending when the
+    export is empty, 409 reclass_submit_in_progress if another submit holds
+    the lock, 503 reclass_remote_unavailable if ssh/scp fail (nothing is
+    recorded in that case)."""
+    body = body or ReclassSubmitRequest()
+    min_len = body.min_length if body.min_length is not None else settings.reclass_export_min_length
+    row = await submit_pending_job(
+        session, rt, min_length=min_len, max_length=body.max_length, limit=body.limit
+    )
+    return ReclassJobOut(**row)
+
+
+def _polled(p) -> ReclassPolledJob:
+    return ReclassPolledJob(previous_status=p.previous_status, job=ReclassJobOut(**p.job))
+
+
+@router.post("/jobs/poll", response_model=ReclassPollResponse)
+async def poll_reclass_jobs(
+    session: AsyncSession = Depends(get_session),
+    rt: ReclassRuntime = Depends(get_reclass_runtime),
+) -> ReclassPollResponse:
+    """Run `reclass-status` for every QUEUED/RUNNING job and store the result.
+    Opens no ssh session when nothing is active. A failure on one job does not
+    stop the others; failures come back in `failed`."""
+    polled, failed = await poll_active_jobs(session, rt)
+    return ReclassPollResponse(
+        polled=[_polled(p) for p in polled],
+        failed=[ReclassPollFailure(job_id=f.job_id, error=f.error) for f in failed],
+    )
+
+
+@router.post("/jobs/{job_id}/poll", response_model=ReclassPolledJob)
+async def poll_reclass_job(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+    rt: ReclassRuntime = Depends(get_reclass_runtime),
+) -> ReclassPolledJob:
+    """Poll one job (any status) and store the result."""
+    return _polled(await poll_job(session, rt, job_id))
 
 
 @router.post("/jobs", response_model=ReclassJobOut, status_code=201)

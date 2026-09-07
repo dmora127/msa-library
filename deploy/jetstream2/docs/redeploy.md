@@ -163,23 +163,26 @@ grep -E '^(PUBLIC_HOST|API_KEYS|ADMIN_API_KEY|PGWEB_AUTH_PASS)=' .env.api
 
 ## Phase 5 — Host assets the repo cannot carry
 
-`docker-compose.api.yml` bind-mounts four host paths. **All must exist**, or
-Docker creates empty directories over them.
+`docker-compose.api.yml` bind-mounts six host paths. **All must exist**, or
+Docker creates empty directories over them (which, for the two key files, then
+breaks ssh with "not a regular file").
 
 ```bash
 sudo mkdir -p /opt/diamond          # required even for CLASSIFIER_IMPL=noop
 sudo mkdir -p /mnt/pgdata/similarity && sudo chown "$USER" /mnt/pgdata/similarity
-sudo mkdir -p /mnt/pgdata/reclass    && sudo chown "$USER" /mnt/pgdata/reclass
-ls -l ~/private-key.pem ~/.config/pelican
+ssh-keygen -t ed25519 -N "" -C "af3cache-api reclass $(hostname)" -f ~/.ssh/reclass_ed25519
+ssh-keyscan -t ed25519 <blast-box-ip> > ~/.ssh/reclass_known_hosts
+ls -l ~/private-key.pem ~/.config/pelican ~/.ssh/reclass_ed25519 ~/.ssh/reclass_known_hosts
 ```
 
 - **`/mnt/pgdata/similarity`** — `SIMILARITY_DB_ROOT` for the MMseqs2 snapshot
   mode (nightly/delta generations + symlinks). Empty is fine; unused while
   `SIMILARITY_DB_MODE=ephemeral`. Must be on the data volume (Phase 2), not
   the root disk.
-- **`/mnt/pgdata/reclass`** — local copies of the FASTAs
-  `helpers/reclassify_export.sh` ships to the NR BLAST box (newest 8 kept).
-  Not a bind mount; the host helper writes it directly.
+- **`~/.ssh/reclass_ed25519` + `~/.ssh/reclass_known_hosts`** — the api's
+  dedicated identity for the NR-BLAST box and that box's pinned host key
+  (mounted at `/keys/…`). The public key must be registered on the box; see
+  "Reclassification export" for the forced-command hardening.
 
 - **`/opt/diamond`** — empty is fine for `noop`. For `CLASSIFIER_IMPL=diamond`,
   copy the ~3 GB binary + SwissProt DB from an existing instance:
@@ -701,25 +704,27 @@ Job uploads publish cache entries with `species = query_name = 'Pending
 Classification'` (the in-app sweep only handles `Unclassified`). Those rows are
 labelled by an external pipeline on the NR BLAST box
 (`exouser@<blast-box-ip>`), which POSTs one result per sequence to the existing
-`POST /v1/admin/reclassify`. This VM's side of it is two cron helpers and three
-admin endpoints; nothing runs inside the api container on a timer, and the
-container has no ssh (keys live on the host).
+`POST /v1/admin/reclassify`. This VM's side is **driven by the API**: the api
+container exports the pending set, scp's it to the box and runs the box's
+tools over ssh, so the same call works from cron, from a shell with the admin
+key, or from anywhere else. The two cron helpers are thin `curl` wrappers.
 
 ```
-host cron (exouser)                     api container                  BLAST box
+host cron (exouser)              api container                               BLAST box
 30 0 * * *  reclassify_export.sh
-  GET /v1/admin/classification/pending.fa ──▶ streams FASTA (>{sequence_id}|{seq_hash})
-  ◀── /mnt/pgdata/reclass/pending-<ts>.fa          (RECLASS_EXPORT_MIN_LENGTH applied)
-  scp ─────────────────────────────────────────────────────▶ /media/volume/mmseq2-data/inbox/
-  JOB=$(ssh … reclass-submit inbox/pending-<ts>.fa) ◀─────── job id, returns at once
-  POST /v1/admin/classification/jobs {job_id,…} ──▶ reclass_jobs row (QUEUED)
+  POST /v1/admin/classification/jobs/submit
+                                 export pending set -> temp FASTA
+                                 scp  ────────────────────────────────────▶ /media/volume/mmseq2-data/inbox/pending-<ts>.fa
+                                 ssh reclass-submit inbox/<file> ◀──────── job id, returns at once
+                                 insert reclass_jobs (QUEUED); 201 {job}
 */10 * * * * reclassify_poll.sh
-  GET /jobs?active=true ──▶ []  → exit 0, no ssh
-                      ──▶ [job] → ssh … reclass-status <job> ◀──── JSON
-                              PUT /jobs/<job>/status ──▶ row updated; terminal
-                                                          status stops polling
-                                                    ◀──── meanwhile the box POSTs
-                                                          /v1/admin/reclassify per sequence
+  POST /v1/admin/classification/jobs/poll
+                                 no QUEUED/RUNNING rows -> [] with NO ssh
+                                 else per job: ssh reclass-status <job> ◀── JSON
+                                               update reclass_jobs; terminal
+                                               status stops further polling
+                                                                    ◀──── meanwhile the box POSTs
+                                                                          /v1/admin/reclassify per sequence
 ```
 
 Remote contract: `reclass-submit inbox/<file>` prints a job id
@@ -727,47 +732,89 @@ Remote contract: `reclass-submit inbox/<file>` prints a job id
 `status ∈ QUEUED|RUNNING|DONE|FAILED|KILLED|UNKNOWN`, `records`,
 `posted_so_far`, `summary {rows, status_200, status_NO_HIT, …}`, timestamps,
 `exit_code`, `log_tail`. The box forgets jobs after **15 days** (then
-`UNKNOWN`, exit 2); the `reclass_jobs` row here is the durable record.
+`UNKNOWN`, exit 2); the `reclass_jobs` row here is the durable record. The
+box's `reclass.sh` needs OUR admin key to post results: it reads
+`~/reclass/.api_key` (mode 600) there.
 
-Endpoints (admin key): `GET /v1/admin/classification/pending.fa`
-(`?min_length=`, `?max_length=`, `?limit=`; headers `X-Sequence-Count`,
-`X-Min-Length`), `POST /v1/admin/classification/jobs`,
-`GET /v1/admin/classification/jobs[?active=true]`, `GET …/jobs/{id}`,
-`PUT …/jobs/{id}/status` (body = the raw `reclass-status` JSON).
+Endpoints (admin key):
 
-Helper env overrides (defaults): `REMOTE=exouser@<blast-box-ip>`,
-`REMOTE_DATA_DIR=/media/volume/mmseq2-data`,
-`REMOTE_SUBMIT=/home/exouser/.local/bin/reclass-submit`,
-`REMOTE_STATUS=/home/exouser/.local/bin/reclass-status` (full paths on purpose:
-`~/.local/bin` is not on the PATH of a non-interactive ssh session),
-`EXPORT_DIR=/mnt/pgdata/reclass`, `KEEP=8`,
-`EXTRA_QUERY=` (e.g. `limit=50`, `max_length=2000`). The length floor is
-`RECLASS_EXPORT_MIN_LENGTH` in `.env.api` (30).
+| route | does |
+|---|---|
+| `POST /v1/admin/classification/jobs/submit` (body `{min_length?, max_length?, limit?}`) | export → scp → `reclass-submit` → record; 201 with the job. 409 `reclass_nothing_pending` when the export is empty, 409 `reclass_submit_in_progress` while another submit runs, 503 `reclass_remote_unavailable` on ssh/scp failure (nothing recorded). Synchronous, ~10–60 s. |
+| `POST /v1/admin/classification/jobs/poll` | `reclass-status` for every QUEUED/RUNNING job; `{polled: [{previous_status, job}], failed: [{job_id, error}]}`. No ssh when nothing is active. |
+| `POST /v1/admin/classification/jobs/{id}/poll` | poll one job (any status). |
+| `GET /v1/admin/classification/pending.fa` (`?min_length=`, `?max_length=`, `?limit=`) | the export on its own (what submit uploads); headers `X-Sequence-Count`, `X-Min-Length`. |
+| `GET /jobs[?active=true]`, `GET /jobs/{id}`, `POST /jobs`, `PUT /jobs/{id}/status` | job records; the last two exist for out-of-band submissions. |
 
-One-time prep and first run:
+Settings (`.env.api`): `RECLASS_EXPORT_MIN_LENGTH` (30), `RECLASS_REMOTE`,
+`RECLASS_REMOTE_DATA_DIR`, `RECLASS_REMOTE_SUBMIT` / `RECLASS_REMOTE_STATUS`
+(absolute paths: `~/.local/bin` is not on a non-interactive ssh PATH),
+`RECLASS_SSH_KEY_FILE`, `RECLASS_KNOWN_HOSTS_FILE`. Helper env: `MIN_LENGTH`,
+`MAX_LENGTH`, `LIMIT` (request body), e.g. `LIMIT=50 helpers/reclassify_export.sh`.
+
+### One-time setup: the container's ssh identity
+
+The api container carries `openssh-client` (Dockerfile) but **no key**. Give it
+a dedicated key and a pinned host key, both bind-mounted read-only
+(`docker-compose.api.yml` → `/keys/reclass_ed25519`, `/keys/reclass_known_hosts`).
+Never reuse a personal key: this one can be revoked on the box alone.
+
+```bash
+# on this VM
+ssh-keygen -t ed25519 -N "" -C "af3cache-api reclass $(hostname)" -f ~/.ssh/reclass_ed25519
+ssh-keyscan -t ed25519 <blast-box-ip> > ~/.ssh/reclass_known_hosts   # pin the host key
+cat ~/.ssh/reclass_ed25519.pub                                          # -> authorized_keys on the box
+```
+
+On the BLAST box, add that public key to `~/.ssh/authorized_keys`. Plain is
+fine to start; the hardened form restricts the key to exactly what the api
+does (upload into the inbox, submit, status) via a forced-command wrapper:
+
+```
+restrict,command="/home/exouser/reclass/api-gate" ssh-ed25519 AAAA... af3cache-api reclass
+```
+```bash
+#!/usr/bin/env bash   # /home/exouser/reclass/api-gate  (chmod 755)
+set -euo pipefail
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  "scp -t /media/volume/mmseq2-data/inbox/"*)         exec $SSH_ORIGINAL_COMMAND ;;   # legacy scp
+  "/home/exouser/.local/bin/reclass-submit inbox/"*)  exec $SSH_ORIGINAL_COMMAND ;;
+  "/home/exouser/.local/bin/reclass-status "*)        exec $SSH_ORIGINAL_COMMAND ;;
+  *) echo "api-gate: refused: ${SSH_ORIGINAL_COMMAND:-<none>}" >&2; exit 126 ;;
+esac
+```
+(Newer OpenSSH `scp` uses the SFTP protocol; if uploads fail with the gate in
+place, either allow `internal-sftp` there or pass `-O` to scp via
+`RECLASS_SCP_BINARY` wrapper. Test with `LIMIT=5` before relying on it.)
+
+Then, on this VM: set `RECLASS_SSH_KEY_FILE=/keys/reclass_ed25519` and
+`RECLASS_KNOWN_HOSTS_FILE=/keys/reclass_known_hosts` in `.env.api`, rebuild
+`api` (the image gained openssh-client), and smoke-test:
 
 ```bash
 cd /opt/af3-cache/deploy/jetstream2
 H=$(grep '^PUBLIC_HOST=' .env.api | cut -d= -f2); ADM=$(grep '^ADMIN_API_KEY=' .env.api | cut -d= -f2)
-sudo mkdir -p /mnt/pgdata/reclass && sudo chown "$USER" /mnt/pgdata/reclass      # Phase 5
-ssh -o StrictHostKeyChecking=accept-new exouser@<blast-box-ip> \
-    /home/exouser/.local/bin/reclass-status nosuchjob        # records host key; expect UNKNOWN JSON, exit 2
-curl -sk -D - -o /tmp/p.fa "https://$H/v1/admin/classification/pending.fa?limit=5" -H "X-API-Key: $ADM" && head -2 /tmp/p.fa
-EXTRA_QUERY=limit=50 helpers/reclassify_export.sh          # small real job; prints job=<id>
-helpers/reclassify_poll.sh                                 # repeat every few minutes until DONE
-curl -sk "https://$H/v1/admin/classification/jobs" -H "X-API-Key: $ADM" | python3 -m json.tool | head -40
+docker exec af3cache-api-1 ssh -i /keys/reclass_ed25519 -o IdentitiesOnly=yes \
+  -o UserKnownHostsFile=/keys/reclass_known_hosts -o StrictHostKeyChecking=yes -o BatchMode=yes \
+  exouser@<blast-box-ip> /home/exouser/.local/bin/reclass-status nosuchjob   # UNKNOWN JSON, exit 2
+curl -sk -X POST "https://$H/v1/admin/classification/jobs/submit" -H "X-API-Key: $ADM" \
+     -H 'content-type: application/json' -d '{"limit": 50}' | python3 -m json.tool      # 201, job_id
+curl -sk -X POST "https://$H/v1/admin/classification/jobs/poll" -H "X-API-Key: $ADM" | python3 -m json.tool
+LIMIT=50 helpers/reclassify_export.sh && helpers/reclassify_poll.sh              # the cron path
 ```
+
+Then install the two cron lines in Phase 9. Logs:
+`/mnt/pgdata/backups/reclassify_export.log`, `…/reclassify_poll.log`, the api's
+`af3cache.reclass*` / `af3cache.classification_export` lines in
+`docker logs af3cache-api-1`, and the remote per-job log the box keeps.
+Consecutive nightly exports overlap while a multi-day job is still running;
+that is by design (the box queues, the callback only touches rows still
+pending). Re-ingesting a sequence resets it to pending, so it simply appears in
+a later export. `/mnt/pgdata/reclass` (Phase 5) is no longer written by the
+API-driven path; the box retains each job's input (`input_retained`) instead.
 
 Grafana's "Classification (NR-BLAST reclassification)" row shows the
 classified / pending / unclassified split of ACTIVE entries (percent and count)
 and the active / failed job counts, from the `af3cache_classification_count`
 and `af3cache_reclass_jobs_count` gauges in `monitoring/postgres_queries.yaml`
 (both need the Phase 10 exporter grants).
-
-Then uncomment the two cron lines in Phase 9. Logs:
-`/mnt/pgdata/backups/reclassify_export.log`, `…/reclassify_poll.log`, the
-api's `af3cache.classification_export` lines in `docker logs af3cache-api-1`,
-and the remote run log the box keeps per job. Consecutive nightly exports
-overlap while a multi-day job is still running; that is by design (the box
-queues, the callback only touches rows still pending). Re-ingesting a sequence
-resets it to pending, so it will simply appear in a later export.

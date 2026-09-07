@@ -48,6 +48,13 @@ FROM python:3.12-slim
 # uv for fast, reproducible installs
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# openssh-client: POST /v1/admin/classification/jobs/{submit,poll} scp/ssh to
+# the NR-BLAST box (app/services/reclass_remote.py). The deploy key and the
+# pinned known_hosts are mounted read-only at runtime, never baked in.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssh-client \
+ && rm -rf /var/lib/apt/lists/*
+
 # pelican CLI: `pelican token create` (TOKEN_ISSUER_IMPL=pelican) and
 # `pelican object get|rm` (OSDF_CLIENT_IMPL=pelican) run from inside the
 # container. Credentials stay OUT of the image — mounted at runtime.

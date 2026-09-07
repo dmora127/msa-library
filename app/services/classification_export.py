@@ -13,8 +13,11 @@ landing between the two statements; the count is advisory).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +27,13 @@ from app.services.classifier import PENDING_CLASSIFICATION
 log = logging.getLogger("af3cache.classification_export")
 
 _CHUNK_ROWS = 5000
+
+
+@dataclass(frozen=True)
+class ExportStats:
+    sequence_count: int
+    residue_count: int
+    bytes: int
 
 _PENDING_PREDICATE = """
     s.molecule_type = 'protein'
@@ -99,3 +109,36 @@ async def iter_pending_fasta(
         "classification export: %d sequences, %d residues (min_length=%d max_length=%s limit=%s)",
         count, residues, min_length, max_length, limit,
     )
+
+
+def _append_bytes(path: Path, chunk: bytes) -> None:
+    with path.open("ab") as fh:
+        fh.write(chunk)
+
+
+async def write_pending_fasta(
+    session: AsyncSession,
+    path: Path,
+    *,
+    min_length: int,
+    max_length: int | None = None,
+    limit: int | None = None,
+) -> ExportStats:
+    """Same stream as iter_pending_fasta, written to a file (for the
+    API-driven submit, which scps it to the BLAST box). Counts are taken from
+    the bytes actually written, so they match the file exactly."""
+    await asyncio.to_thread(path.write_bytes, b"")
+    count = residues = nbytes = 0
+    async for chunk in iter_pending_fasta(
+        session, min_length=min_length, max_length=max_length, limit=limit
+    ):
+        await asyncio.to_thread(_append_bytes, path, chunk)
+        nbytes += len(chunk)
+        for line in chunk.split(b"\n"):
+            if not line:
+                continue
+            if line.startswith(b">"):
+                count += 1
+            else:
+                residues += len(line)
+    return ExportStats(sequence_count=count, residue_count=residues, bytes=nbytes)

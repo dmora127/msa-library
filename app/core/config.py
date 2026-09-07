@@ -149,6 +149,22 @@ class Settings(BaseSettings):
     # than this (aa); peptides below it get no meaningful NR hit. Overridable
     # per request with ?min_length=.
     reclass_export_min_length: int = 30
+    # Remote NR-BLAST box the api talks to over ssh/scp for
+    # POST /v1/admin/classification/jobs/submit and .../poll. The container
+    # needs openssh-client (in the image) plus a dedicated key and a pinned
+    # known_hosts file mounted read-only (docker-compose.api.yml). Tool paths
+    # are absolute because ~/.local/bin is not on a non-interactive ssh PATH.
+    reclass_remote: str = "exouser@<blast-box-ip>"
+    reclass_remote_data_dir: str = "/media/volume/mmseq2-data"
+    reclass_remote_submit: str = "/home/exouser/.local/bin/reclass-submit"
+    reclass_remote_status: str = "/home/exouser/.local/bin/reclass-status"
+    reclass_ssh_binary: str = "ssh"
+    reclass_scp_binary: str = "scp"
+    reclass_ssh_key_file: str | None = None  # None = ssh's default identities
+    reclass_known_hosts_file: str | None = None  # None = accept-new into the default file
+    reclass_ssh_timeout_seconds: float = 120.0
+    reclass_scp_timeout_seconds: float = 600.0
+    reclass_tmp_root: str | None = None  # where the export is staged before scp
 
     # Adjustable operational defaults (overridable via app_settings)
     max_upload_size_bytes: int = 104_857_600
