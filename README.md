@@ -44,6 +44,10 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
   namespace template, reap grace hours. Never returns/accepts API keys.
 - `GET|PUT /v1/admin/sources` — list / toggle `msa_sources.enabled`
   (query visibility; the community source's flag also gates job uploads).
+- `POST /v1/admin/maintenance/sweep-ingestions` — abandoned-upload sweeper
+  (cron, 15 min): re-attempts every `pending`/`uploaded` ingestion older than
+  30 min through verify+publish; still unverifiable past 24 h → `rejected`
+  with reason `Expired - Upload unverifiable`. `dry_run` reports without acting.
 - `POST /v1/admin/maintenance/run` — idle sweep + reaper (cron/scheduler hits
   this). Admin-key gated.
 - `POST /v2/query` — **experimental**: `/v1/query` plus an opt-in

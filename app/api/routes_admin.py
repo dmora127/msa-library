@@ -22,15 +22,19 @@ from app.schemas.admin import (
     ReclassifyResponse,
     SourceInfo,
     SourceUpdate,
+    SweepIngestionsRequest,
+    SweepIngestionsResponse,
 )
 from app.schemas.ingestion import UploadCompleteResponse
 from app.services.deps import (
     get_capacity_gate,
     get_ingestion_service,
+    get_ingestion_sweeper,
     get_maintenance_service,
     get_settings_service,
 )
 from app.services.ingestion_service import IngestionService
+from app.services.ingestion_sweeper import IngestionSweeper
 from app.services.maintenance_service import MaintenanceService
 from app.services.namespace_capacity import NamespaceCapacityGate
 from app.services.settings_service import SettingsService
@@ -148,6 +152,29 @@ async def run_maintenance(
     """Idle-sweep then reap. Intended to be hit by a cron/scheduler."""
     res = await svc.run()
     return {"marked_stale": res.marked_stale, "reaped": res.reaped}
+
+
+@router.post(
+    "/maintenance/sweep-ingestions", response_model=SweepIngestionsResponse
+)
+async def sweep_ingestions(
+    body: SweepIngestionsRequest | None = None,
+    sweeper: IngestionSweeper = Depends(get_ingestion_sweeper),
+) -> SweepIngestionsResponse:
+    """Re-attempt completion of abandoned uploads (pending/uploaded rows older
+    than SWEEP_MIN_AGE_MINUTES) through the normal verify+publish pipeline; a
+    row that still cannot be verified once it is older than SWEEP_MAX_AGE_HOURS
+    is rejected as "Expired - Upload unverifiable". Idempotent, safe to call
+    any time; `dry_run` reports what would happen. Driven every 15 min by
+    helpers/sweep_ingestions.sh. Deliberately separate from /maintenance/run
+    (which reaps OSDF objects and is intentionally unscheduled)."""
+    body = body or SweepIngestionsRequest()
+    res = await sweeper.run(
+        limit=body.limit, dry_run=body.dry_run,
+        min_age_minutes=body.min_age_minutes, max_age_hours=body.max_age_hours,
+        budget_seconds=body.budget_seconds,
+    )
+    return SweepIngestionsResponse(**res.as_dict())
 
 
 @router.post("/maintenance/reclassify")

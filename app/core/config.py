@@ -177,6 +177,16 @@ class Settings(BaseSettings):
         "osdf:///af3-msa-library/community-contributed/{ingestion_id}.a3m"
     )
     reap_grace_hours: int = 12
+    # Abandoned-ingestion sweeper (POST /v1/admin/maintenance/sweep-ingestions,
+    # driven by helpers/sweep_ingestions.sh from cron). Every run re-attempts
+    # completion of each pending/uploaded row older than sweep_min_age_minutes;
+    # a row whose attempt does not complete it AND is older than
+    # sweep_max_age_hours is rejected as "Expired - Upload unverifiable". All
+    # four are per-call overridable in the request body.
+    sweep_min_age_minutes: int = 30
+    sweep_max_age_hours: int = 24
+    sweep_default_limit: int = 50
+    sweep_budget_seconds: int = 600
     # Coarsen the read-side last_accessed_at bump: only update when the stored
     # value is older than this, bounding write amplification on hot sequences.
     access_bump_granularity_seconds: int = 86_400

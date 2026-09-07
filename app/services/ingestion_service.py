@@ -395,6 +395,15 @@ class IngestionService:
             ingestion_id=ingestion_id, status="rejected", reject_reason=reason
         )
 
+    async def reject_ingestion(
+        self, ingestion_id: str, reason: str
+    ) -> UploadCompleteResponse:
+        """Public entry to the reject path for callers outside the verify
+        pipeline (the abandoned-ingestion sweeper's expiry). Same effect as a
+        pipeline rejection: status 'rejected' + reason; the OSDF object and
+        cache_entry_id are left alone."""
+        return await self._reject(ingestion_id, reason)
+
     async def _resolve_classification(
         self, sequence: str, overrides: PublishOverrides | None
     ) -> tuple[str, str]:

@@ -21,6 +21,7 @@ from app.db.session import get_session
 from app.services.a3m_validator import A3mValidator
 from app.services.classifier import Classifier, build_classifier
 from app.services.ingestion_service import IngestionService
+from app.services.ingestion_sweeper import IngestionSweeper
 from app.services.maintenance_service import MaintenanceService
 from app.services.namespace_capacity import NamespaceCapacityGate
 from app.services.osdf_client import OsdfClient, build_osdf_client
@@ -132,6 +133,13 @@ def get_ingestion_service(
         namespaces,
         capacity,
     )
+
+
+def get_ingestion_sweeper(
+    session: AsyncSession = Depends(get_session),
+    ingestion: IngestionService = Depends(get_ingestion_service),
+) -> IngestionSweeper:
+    return IngestionSweeper(session, ingestion, get_settings())
 
 
 def get_maintenance_service(

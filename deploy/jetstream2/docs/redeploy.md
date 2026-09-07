@@ -354,8 +354,10 @@ MAILTO=you@example.edu
 # size floor, and a pg_restore --list integrity check.
 0 6 * * 0    ENV_FILE=/opt/af3-cache/deploy/jetstream2/.env.prod BACKUP_DIR=/media/volume/application-backup/af3cache /opt/af3-cache/deploy/jetstream2/helpers/af3cache_backup.sh >> /home/exouser/logs/backup.log 2>&1
 
-# Re-drive ingestions stuck in 'uploaded' (idempotent, lockfile-guarded).
-*/15 * * * * /opt/af3-cache/deploy/jetstream2/helpers/recover_stuck_uploads.sh >> /mnt/pgdata/backups/recover_stuck_uploads.log 2>&1
+# Abandoned-ingestion sweeper: re-attempts every pending/uploaded row older than
+# 30 min through verify+publish, expires what is still unverifiable past 24 h
+# (idempotent, lockfile-guarded; see "Abandoned-ingestion sweeper" below).
+*/15 * * * * /opt/af3-cache/deploy/jetstream2/helpers/sweep_ingestions.sh >> /mnt/pgdata/backups/sweep_ingestions.log 2>&1
 
 # Data-volume mount guard (see Phase 2 warning). Publishes af3cache_pgdata_mounted.
 */5 * * * *  /opt/af3-cache/deploy/jetstream2/helpers/volume_guard.sh
@@ -387,6 +389,40 @@ MAILTO=you@example.edu
 > at production query volume almost nothing is ever refreshed — enabling this
 > would begin permanently deleting community-contributed `.a3m` objects. It needs
 > an explicit retention decision and a `dry_run` mode first.
+
+### Abandoned-ingestion sweeper
+
+Jobs abandon uploads (API outage mid-job, interrupted job, token expired before
+the put), leaving `msa_ingestions` rows in `pending`/`uploaded` forever — and
+reserving phantom bytes in the namespace capacity gate. `helpers/sweep_ingestions.sh`
+calls `POST /v1/admin/maintenance/sweep-ingestions` every 15 min:
+
+- every row older than `SWEEP_MIN_AGE_MINUTES` (30) is re-run through the normal
+  verify+publish pipeline — the same code a job's own `/complete` hits;
+- a row whose attempt still cannot fetch the object AND that is older than
+  `SWEEP_MAX_AGE_HOURS` (24) is rejected with `reject_reason =
+  "Expired - Upload unverifiable"`. Nothing on OSDF is deleted and
+  `msa_cache_entries` is untouched;
+- breaker: if every attempt in a run failed with OSDF unavailable (≥ 3
+  attempted), expiries are held that run — an OSDF outage must not convert real
+  uploads into rejections.
+
+It is deliberately separate from `/maintenance/run` (below), which reaps. Before
+installing the cron line on a new instance, look first:
+
+```bash
+ADM=$(grep '^ADMIN_API_KEY=' .env.api | cut -d= -f2)
+curl -sk -X POST https://$H/v1/admin/maintenance/sweep-ingestions -H "X-API-Key: $ADM" \
+     -H 'content-type: application/json' -d '{"dry_run": true}' | jq '.items[] | {id, outcome, age_h: (.age_seconds/3600|floor)}'
+curl -sk -X POST https://$H/v1/admin/maintenance/sweep-ingestions -H "X-API-Key: $ADM" \
+     -H 'content-type: application/json' -d '{"limit": 5}' | jq 'del(.items)'
+```
+
+The body may also carry `min_age_minutes`, `max_age_hours` (e.g. widen while
+debugging an origin problem) and `budget_seconds`. Log:
+`/mnt/pgdata/backups/sweep_ingestions.log`; metrics `af3cache_ingestion_sweep_total{outcome}`
+and the exporter's `af3cache_inflight_ingestions_count{age}` (alerts
+`af3-ingest-sweeper-stalled`, `af3-ingest-sweeper-errors`).
 
 ### Dead-man's switches (healthchecks.io)
 

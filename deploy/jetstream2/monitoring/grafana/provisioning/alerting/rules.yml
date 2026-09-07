@@ -587,8 +587,9 @@ groups:
     labels:
       severity: warning
     annotations:
-      summary: More than 20 ingestions stuck in 'uploaded'. helpers/recover_stuck_uploads.sh runs every
-        15 min; check its log.
+      summary: More than 20 ingestions in 'uploaded' for 30 min. helpers/sweep_ingestions.sh runs every 15 min
+        and re-attempts each one; check /mnt/pgdata/backups/sweep_ingestions.log. A burst right after the
+        sweeper's first run is expected (pending rows are promoted to uploaded on each attempt).
   - uid: af3-target-down
     title: Prometheus target down
     condition: B
@@ -1287,3 +1288,107 @@ groups:
         namespace is within its capacity headroom. Jobs cannot contribute until capacity is added or a
         namespace is enabled. If usage looks fine on the namespaces dashboard, capacity_tb in namespaces.yaml
         is set too low.'
+  # --- abandoned-ingestion sweeper -------------------------------------------
+  # In-flight rows older than 25 h should not exist: the sweeper (cron, 15 min)
+  # expires anything still unverifiable past 24 h.
+  - uid: af3-ingest-sweeper-stalled
+    title: Abandoned ingestions not being swept
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: max(af3cache_inflight_ingestions_count{age="over_24h"}) or vector(0)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 2h
+    labels:
+      severity: warning
+    annotations:
+      summary: In-flight ingestions older than 25 h exist. The sweeper cron (helpers/sweep_ingestions.sh)
+        is not running, the API is erroring on them, or the OSDF-outage breaker is holding expiries.
+        Check /mnt/pgdata/backups/sweep_ingestions.log and POST /v1/admin/maintenance/sweep-ingestions
+        with {"dry_run":true}.
+  - uid: af3-ingest-sweeper-errors
+    title: Ingestion sweeper hitting errors
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(increase(af3cache_ingestion_sweep_total{outcome="error"}[1h])) or vector(0)
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: The abandoned-ingestion sweeper raised an unexpected error on at least one row in the last
+        hour (rows are skipped, not lost). See `docker compose logs api | grep "sweep ingestion"` for the
+        traceback.

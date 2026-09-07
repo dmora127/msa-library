@@ -152,6 +152,20 @@ NAMESPACE_ACCEPTING = Gauge(
     ["namespace"],
 )
 
+# --- abandoned-ingestion sweeper -------------------------------------------
+# Cron-driven (POST /v1/admin/maintenance/sweep-ingestions). Outcomes per row:
+# published | rejected_verify | unverified | expired | expiries_held | error.
+INGESTION_SWEEP = Counter(
+    "af3cache_ingestion_sweep_total",
+    "Abandoned-ingestion sweeper outcomes per row.",
+    ["outcome"],
+)
+INGESTION_SWEEP_RUN_SECONDS = Histogram(
+    "af3cache_ingestion_sweep_run_seconds",
+    "Wall time of one sweeper run.",
+    buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1200),
+)
+
 # --- classifier -------------------------------------------------------------
 # DiamondClassifier returns UNCLASSIFIED on EVERY failure path and never raises,
 # so a broken diamond is invisible over HTTP. This separates "no hit" (a real
@@ -270,6 +284,17 @@ def record_namespace_state(
     NAMESPACE_MIN_HEADROOM_PCT.labels(namespace=namespace).set(min_headroom_pct)
     NAMESPACE_ENABLED.labels(namespace=namespace).set(1 if enabled else 0)
     NAMESPACE_ACCEPTING.labels(namespace=namespace).set(1 if accepting else 0)
+
+
+@_safe
+def record_ingestion_sweep(outcome: str, n: int = 1) -> None:
+    if n:
+        INGESTION_SWEEP.labels(outcome=outcome).inc(n)
+
+
+@_safe
+def record_ingestion_sweep_run(seconds: float) -> None:
+    INGESTION_SWEEP_RUN_SECONDS.observe(seconds)
 
 
 @_safe

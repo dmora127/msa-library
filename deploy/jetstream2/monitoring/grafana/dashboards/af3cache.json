@@ -6,7 +6,7 @@
   ],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 12,
+  "version": 13,
   "refresh": "1s",
   "time": {
     "from": "now-6h",
@@ -3274,7 +3274,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 96
+        "y": 103
       },
       "panels": []
     },
@@ -3291,7 +3291,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 97
+        "y": 104
       },
       "targets": [
         {
@@ -3350,7 +3350,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 97
+        "y": 104
       },
       "targets": [
         {
@@ -3383,6 +3383,154 @@
           "unit": "short",
           "min": 0,
           "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 59,
+      "type": "timeseries",
+      "title": "In-flight ingestions by age",
+      "description": "pending + uploaded rows by age. The sweeper (helpers/sweep_ingestions.sh, every 15 min) re-attempts everything over 30 min and expires what is still unverifiable past 24 h, so over_24h should stay at 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 96
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (age) (af3cache_inflight_ingestions_count)",
+          "legendFormat": "{{age}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "over_24h"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 60,
+      "type": "timeseries",
+      "title": "Sweeper outcomes (per hour)",
+      "description": "af3cache_ingestion_sweep_total by outcome. published = abandoned upload rescued; expired = rejected as 'Expired - Upload unverifiable' past 24 h; unverified = retried next run; expiries_held = OSDF-outage breaker engaged; error = see api log.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "af3cache-prom"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 96
+      },
+      "maxDataPoints": 1000,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "af3cache-prom"
+          },
+          "editorMode": "code",
+          "expr": "sum by (outcome) (increase(af3cache_ingestion_sweep_total[1h]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal"
+            }
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [

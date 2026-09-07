@@ -64,6 +64,53 @@ class NamespaceStatus(BaseModel):
     inflight_count: int
 
 
+class SweepIngestionsRequest(BaseModel):
+    """Body for POST /v1/admin/maintenance/sweep-ingestions. Every field
+    overrides the SWEEP_* env default for this call only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dry_run: bool = False
+    limit: int | None = Field(default=None, gt=0, le=1000)
+    min_age_minutes: int | None = Field(default=None, ge=0)
+    max_age_hours: int | None = Field(default=None, gt=0)
+    budget_seconds: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _check(self) -> SweepIngestionsRequest:
+        if (
+            self.max_age_hours is not None
+            and self.min_age_minutes is not None
+            and self.max_age_hours * 60 <= self.min_age_minutes
+        ):
+            raise ValueError("max_age_hours must exceed min_age_minutes")
+        return self
+
+
+class SweepIngestionItem(BaseModel):
+    id: str
+    status_before: str
+    age_seconds: int
+    outcome: str
+    detail: str | None = None
+
+
+class SweepIngestionsResponse(BaseModel):
+    dry_run: bool
+    scanned: int
+    attempted: int
+    published: int
+    rejected_verify: int
+    unverified: int
+    expired: int
+    expiries_held: int
+    errors: int
+    skipped_budget: int
+    exhausted: bool
+    elapsed_seconds: float
+    items: list[SweepIngestionItem]
+
+
 class SourceInfo(BaseModel):
     name: str
     enabled: bool

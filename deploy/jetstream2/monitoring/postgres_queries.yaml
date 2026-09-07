@@ -132,3 +132,22 @@ af3cache_namespace:
     - available_count: { usage: "GAUGE", description: "published objects still holding a cache entry" }
     - inflight_count:  { usage: "GAUGE", description: "pending + uploaded rows (space reserved at declared size)" }
     - used_bytes:      { usage: "GAUGE", description: "bytes counted against the namespace's capacity" }
+
+# In-flight ingestions (pending/uploaded) by age, for the abandoned-ingestion
+# sweeper (helpers/sweep_ingestions.sh, every 15 min). The sweeper re-attempts
+# everything older than 30 min and expires what is still unverifiable past 24 h,
+# so `over_24h` should sit at ~0: a growing count means the cron is dead, the
+# API is erroring, or the OSDF-outage breaker is holding expiries
+# (alert af3-ingest-sweeper-stalled). Cheap: status index, ~30 rows.
+af3cache_inflight_ingestions:
+  query: >
+    select case when created_at < now() - interval '25 hours' then 'over_24h'
+                when created_at < now() - interval '30 minutes' then 'over_30m'
+                else 'fresh' end as age,
+           count(*) as count
+      from public.msa_ingestions
+     where status in ('pending', 'uploaded')
+     group by 1
+  metrics:
+    - age:   { usage: "LABEL", description: "fresh (<30m) | over_30m | over_24h (25h+, sweeper should have expired)" }
+    - count: { usage: "GAUGE", description: "in-flight ingestions in that age bucket" }
