@@ -22,6 +22,7 @@ async def test_stats_is_public_and_shape_is_exactly_the_spec(client):
         "uniqueProteins",
         "species",
         "communityContributed",
+        "osgGenerated",
         "queriesToday",
         "queriesTotal",
         "queriesWithHitsToday",
@@ -30,7 +31,7 @@ async def test_stats_is_public_and_shape_is_exactly_the_spec(client):
     assert d["date"] == datetime.now(UTC).date().isoformat()
     # types are ints (Pydantic enforces); just sanity-check
     for k in ("alignmentsCached", "uniqueProteins", "species",
-              "communityContributed", "queriesToday", "queriesTotal",
+              "communityContributed", "osgGenerated", "queriesToday", "queriesTotal",
               "queriesWithHitsToday", "queriesWithHitsTotal"):
         assert isinstance(d[k], int)
 
@@ -191,3 +192,4 @@ async def test_stats_counts_reflect_seeded_rows(client, db_session):
     # species += {Homo sapiens, Mus musculus} - whatever was already there
     assert d["species"]                >= base["species"]
     assert d["communityContributed"]  == base["communityContributed"] + 1
+    assert d["osgGenerated"]          == base["osgGenerated"] + 1

@@ -14,6 +14,7 @@ from app.schemas.stats import StatsData, StatsResponse
 router = APIRouter(tags=["stats"])
 
 _COMMUNITY = "Community Contributed - Cached"
+_OSG = "OSG-Generated"
 
 _STATS_SQL = """
 select
@@ -22,6 +23,8 @@ select
   (select count(distinct species) from public.msa_cache_entries)         as species,
   (select count(*)                from public.msa_cache_entries
      where source = :community)                                          as community_contributed,
+  (select count(*)                from public.msa_cache_entries
+     where source = :osg)                                                as osg_generated,
   (select coalesce(count, 0)      from public.query_metrics
      where day = current_date)                                           as queries_today,
   (select coalesce(sum(count), 0) from public.query_metrics)             as queries_total,
@@ -36,7 +39,7 @@ async def get_stats(
     session: AsyncSession = Depends(get_session),
 ) -> StatsResponse:
     row = (
-        await session.execute(text(_STATS_SQL), {"community": _COMMUNITY})
+        await session.execute(text(_STATS_SQL), {"community": _COMMUNITY, "osg": _OSG})
     ).one()
     return StatsResponse(
         data=StatsData(
@@ -45,6 +48,7 @@ async def get_stats(
             uniqueProteins=row.unique_proteins,
             species=row.species,
             communityContributed=row.community_contributed,
+            osgGenerated=row.osg_generated,
             queriesToday=row.queries_today or 0,
             queriesTotal=row.queries_total or 0,
             queriesWithHitsToday=row.queries_with_hits_today or 0,

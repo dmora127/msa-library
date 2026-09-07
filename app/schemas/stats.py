@@ -15,6 +15,7 @@ class StatsData(BaseModel):
     uniqueProteins: int        # noqa: N815  distinct msa_sequences.seq_hash
     species: int               # distinct msa_cache_entries.species
     communityContributed: int  # noqa: N815  rows where source = community
+    osgGenerated: int          # noqa: N815  rows where source = OSG-Generated
     queriesToday: int          # noqa: N815  POST /v1/query calls so far today (UTC)
     queriesTotal: int          # noqa: N815  POST /v1/query calls since metrics began (sum over all days)
     queriesWithHitsToday: int  # noqa: N815  sequences served >=1 cached alignment today (UTC)
