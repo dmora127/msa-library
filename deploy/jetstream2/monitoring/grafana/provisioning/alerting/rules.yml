@@ -1127,3 +1127,163 @@ groups:
       summary: Entries now exceed their source's idle_ttl_days and WOULD be deleted if the maintenance/reap
         job were enabled. It is deliberately NOT scheduled. This is a read-only exposure count, not an
         action.
+  # --- per-OSDF-namespace capacity (namespaces.yaml + capacity gate) --------
+  # Headroom % = (capacity - used) / capacity, joined on `namespace` between
+  # the app's registry gauges and postgres-exporter's used_bytes. The
+  # `or ... * 0` keeps a namespace with zero rows at 100% instead of NoData.
+  # Multi-dimensional: one alert instance per namespace.
+  - uid: af3-namespace-headroom-warn
+    title: OSDF namespace headroom below 20%
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: (sum by (namespace) (af3cache_namespace_capacity_bytes) - sum by (namespace) (af3cache_namespace_used_bytes
+          or af3cache_namespace_capacity_bytes * 0)) / sum by (namespace) (af3cache_namespace_capacity_bytes) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 20
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 30m
+    labels:
+      severity: warning
+    annotations:
+      summary: 'OSDF namespace {{ $labels.namespace }} has less than 20% capacity headroom left ({{ printf "%.1f" $values.A.Value }}%).
+        At 10% the capacity gate stops accepting new uploads into it: add capacity, add another namespace
+        to namespaces.yaml, or start retention. Dashboard: af3-cache namespaces.'
+  - uid: af3-namespace-headroom-crit
+    title: OSDF namespace full - gate refusing new uploads
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: (sum by (namespace) (af3cache_namespace_capacity_bytes) - sum by (namespace) (af3cache_namespace_used_bytes
+          or af3cache_namespace_capacity_bytes * 0)) / sum by (namespace) (af3cache_namespace_capacity_bytes) * 100
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 10
+            type: lt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: OSDF namespace {{ $labels.namespace }} is within its capacity headroom ({{ printf "%.1f" $values.A.Value }}% free).
+        The capacity gate now refuses NEW uploads into it (507 namespace_full once every enabled namespace
+        is full); re-requests of existing rows still work. Check GET /v1/admin/namespaces.'
+  # Jobs are actually being turned away: every enabled namespace is full (or
+  # capacity_tb is misconfigured too low in namespaces.yaml).
+  - uid: af3-namespace-refusals
+    title: Upload requests refused with 507 namespace_full
+    condition: B
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: af3cache-prom
+      model:
+        editorMode: code
+        expr: sum(increase(af3cache_app_errors_total{code="namespace_full"}[15m]))
+        instant: true
+        intervalMs: 1000
+        maxDataPoints: 43200
+        legendFormat: __auto
+        range: false
+        refId: A
+    - refId: B
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: __expr__
+      model:
+        conditions:
+        - evaluator:
+            params:
+            - 0
+            type: gt
+          operator:
+            type: and
+          query:
+            params:
+            - A
+          reducer:
+            params: []
+            type: last
+          type: query
+        expression: A
+        refId: B
+        type: threshold
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: 'CRITICAL: OSPool upload requests are being refused with 507 namespace_full - every enabled OSDF
+        namespace is within its capacity headroom. Jobs cannot contribute until capacity is added or a
+        namespace is enabled. If usage looks fine on the namespaces dashboard, capacity_tb in namespaces.yaml
+        is set too low.'

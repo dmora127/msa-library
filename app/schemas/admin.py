@@ -48,6 +48,22 @@ class AdminConfigUpdate(BaseModel):
         return self
 
 
+class NamespaceStatus(BaseModel):
+    """One OSDF namespace from the registry with its live usage, as the
+    capacity gate sees it (GET /v1/admin/namespaces, always a fresh query)."""
+
+    namespace: str
+    enabled: bool
+    accepting: bool
+    capacity_bytes: int
+    used_bytes: int
+    headroom_bytes: int
+    headroom_pct: float
+    min_headroom_pct: float
+    available_count: int
+    inflight_count: int
+
+
 class SourceInfo(BaseModel):
     name: str
     enabled: bool

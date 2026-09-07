@@ -31,6 +31,10 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
   surface identically to OSG/GDM/etc.
 - `POST /v1/uploads/request` — declared size/sha → refuses oversize **before**
   minting a scoped, time-limited write token; creates a `pending` ingestion.
+  507 `namespace_full` when every enabled OSDF namespace is within its
+  capacity headroom (not retryable; see "Namespace registry").
+- `GET /v1/admin/namespaces` — every configured OSDF namespace with usage,
+  capacity, headroom and whether the capacity gate admits new uploads.
 - `POST /v1/uploads/{id}/complete` — fetches the object from OSDF, re-verifies
   sha256 + size + `.a3m` format + that the a3m's query hashes to the declared
   sequence, then publishes it as source **`Community Contributed - Cached`**.
@@ -96,19 +100,36 @@ All `/v1/*` require a static API key (`X-API-Key:` or `Authorization: Bearer`).
 schema (`token_ref` / `token_claim_jti` / observed `token_expires_at`):
 
 - **`pelican`** (default, production): on upload approval the app runs
-  `pelican token create --write --scope-path pelican://<store>/<obj>
-  --lifetime <token_ttl_seconds>`; stdout is the scoped write token handed to
-  the job. The host needs the pelican CLI with a credential authorized to mint
-  write tokens for the store namespaces.
+  `pelican token create <osdf-uri> --write --issuer <issuer>
+  --scope-path <path-sans-namespace> -k <key> --lifetime <token_ttl_seconds>`;
+  stdout is the scoped write token handed to the job. issuer, key and the
+  scope path come from the **namespace registry** (below), so pelican never
+  has to ask the OSDF director which namespace owns the object — that lookup
+  (10 s deadline) was the source of most mint failures. Every failure path is
+  counted in `af3cache_token_issue_total` and logged with pelican's stderr.
 - **`local`** (dev): self-sign a SciToken/WLCG JWT + publish JWKS; offline,
   unit-testable; honored by a live origin only once OSG registers the JWKS.
 - **`stub`** (tests) · **`oauth2`** (v0.2 — origin's OAuth2 issuer; drop-in).
 
-Uploads target the OSDF namespace in `PELICAN_STORE_NAMESPACES` (now the
-single `af3-msa-library` — the namespace `PELICAN_TOKEN_ISSUER` mints for).
-Listing several load-balances across them: independent stores, one picked at
-random per upload (no sharding/replication). Object URLs come from
-`OSDF_NAMESPACE_TEMPLATE`, live value
+### Namespace registry + capacity gate
+
+`PELICAN_NAMESPACES_FILE` (default `/etc/af3cache/namespaces.yaml`, template
+`deploy/jetstream2/namespaces.yaml.example`) lists every OSDF namespace
+uploads may land in — `namespace`, `issuer`, `private_key`, `capacity_tb`,
+optional `min_headroom_pct` / `enabled`. It is validated when the app starts
+(pelican mode refuses to start without it). A fresh upload picks one store at
+random among the *enabled* namespaces that still have capacity headroom:
+usage = published objects (observed bytes, reaped ones excluded) + in-flight
+rows at their declared size, cached 60 s. A namespace at or below its headroom
+(default 10 %) takes no new uploads; when every enabled namespace is full,
+`POST /v1/uploads/request` answers **507 `namespace_full`** (terminal — space
+does not free within a retry window). Re-requests for existing rows are never
+refused, and `enabled: false` drains a store without breaking them.
+`GET /v1/admin/namespaces` shows the live numbers; Grafana has a per-namespace
+dashboard and alerts at 20 % (warning) and 10 % (critical) headroom.
+`msa_ingestions.namespace` records where each object lives.
+
+Object URLs come from `OSDF_NAMESPACE_TEMPLATE`, live value
 `osdf:///af3-msa-library/community-contributed/{ingestion_id}.a3m`, stored and
 returned to jobs as-is. A template may interpolate `{namespace}` (the picked
 store), `{seq_hash}`, `{source_slug}` and `{ingestion_id}`; note that a
@@ -211,7 +232,7 @@ entries through the unchanged `msa_cache_lookup` view.
 See `.env.example`. Key vars: `DATABASE_URL`, `API_KEYS` (comma-separated set,
 rotation-friendly), `ADMIN_API_KEY`, `TOKEN_ISSUER_IMPL`, `OSDF_CLIENT_IMPL`,
 `MAX_UPLOAD_SIZE_BYTES`, `TOKEN_TTL_SECONDS` (1200), `OSDF_NAMESPACE_TEMPLATE`,
-`PELICAN_STORE_NAMESPACES`, `PELICAN_TOKEN_BINARY`,
+`PELICAN_NAMESPACES_FILE` (the namespace registry YAML), `PELICAN_TOKEN_BINARY`,
 `REAP_GRACE_HOURS`, `ACCESS_BUMP_GRANULARITY_SECONDS`, and the
 `SIMILARITY_*` group (`SIMILARITY_DB_MODE`, thresholds, `SIMILARITY_DB_ROOT`,
 `SIMILARITY_MMSEQS_*`, `SIMILARITY_MAX_CONCURRENT`, the two `*_BUILD_ENABLED`

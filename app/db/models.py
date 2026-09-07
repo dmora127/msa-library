@@ -144,6 +144,10 @@ class MsaIngestion(Base):
     observed_sha256: Mapped[str | None] = mapped_column(Text)
     observed_n_sequences: Mapped[int | None] = mapped_column(Integer)
     osdf_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    # OSDF namespace (registry key) the object lives in, derived from osdf_uri
+    # at insert (0016 backfilled existing rows). Drives per-namespace usage
+    # for the capacity gate and postgres-exporter. NULL = unresolvable legacy URI.
+    namespace: Mapped[str | None] = mapped_column(Text)
     token_ref: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     token_claim_jti: Mapped[str | None] = mapped_column(Text)
     token_expires_at: Mapped[datetime] = mapped_column(

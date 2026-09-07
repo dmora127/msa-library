@@ -55,21 +55,22 @@ class Settings(BaseSettings):
     token_signing_key: str | None = None
     token_signing_key_file: str | None = None
     pelican_token_binary: str = "pelican"
-    # `pelican` issuer (TOKEN_ISSUER_IMPL=pelican): the API runs
-    #   pelican token create <object_uri> --write --issuer <pelican_token_issuer>
-    #       -k <pelican_token_private_key> --lifetime <token_ttl_seconds>
-    # Both must be set (and the key file readable inside the container) for the
-    # pelican issuer to mint tokens.
-    pelican_token_issuer: str | None = None
-    pelican_token_private_key: str | None = None
-
-    # Pelican object-store namespace(s) uploads are written to. The live
-    # deployment uses the single OSDF namespace `af3-msa-library` (the one
-    # PELICAN_TOKEN_ISSUER mints for). Listing more than one load-balances:
-    # they are independent stores (no sharding/replication) and one is picked
-    # at random per upload. Only consumed where osdf_namespace_template
-    # contains `{namespace}` — the default template hardcodes the namespace.
-    pelican_store_namespaces: str = "af3-msa-library"
+    # `pelican` issuer (TOKEN_ISSUER_IMPL=pelican): per upload the API runs
+    #   pelican token create <object_uri> --write --issuer <issuer>
+    #       --scope-path <path-sans-namespace> -k <private_key> --lifetime <ttl>
+    # issuer / key / capacity come from the namespace registry below, one entry
+    # per OSDF namespace (store). Passing --issuer AND --scope-path lets pelican
+    # skip its director lookup (10 s deadline, the source of most mint failures).
+    #
+    # Namespace registry (YAML). REQUIRED when TOKEN_ISSUER_IMPL=pelican and
+    # validated at app construction (a bad file stops the container). Optional
+    # otherwise: dryrun logs the same argv from it when present, and the
+    # {namespace} pick for uploads uses its enabled entries.
+    # Format: deploy/jetstream2/namespaces.yaml.example
+    pelican_namespaces_file: str = "/etc/af3cache/namespaces.yaml"
+    # How long the per-namespace usage snapshot (bytes on each store, for the
+    # capacity gate) is cached in-process before it is re-queried.
+    namespace_usage_ttl_seconds: int = 60
 
     # OSDF client (upload-complete fetch+verify, reaper object rm).
     osdf_client_impl: str = "pelican"  # pelican | dryrun | stub
@@ -169,6 +170,9 @@ class Settings(BaseSettings):
     # Adjustable operational defaults (overridable via app_settings)
     max_upload_size_bytes: int = 104_857_600
     token_ttl_seconds: int = 1200
+    # {namespace} is picked at random from the registry's enabled entries that
+    # still have capacity headroom. The default hardcodes the single live store;
+    # switch to osdf:///{namespace}/... once a second namespace exists.
     osdf_namespace_template: str = (
         "osdf:///af3-msa-library/community-contributed/{ingestion_id}.a3m"
     )
@@ -211,11 +215,6 @@ class Settings(BaseSettings):
     def jwt_allowed_alg_set(self) -> set[str]:
         return {a.strip() for a in self.jwt_allowed_algs.split(",") if a.strip()}
 
-    @property
-    def pelican_store_list(self) -> list[str]:
-        return [
-            s.strip() for s in self.pelican_store_namespaces.split(",") if s.strip()
-        ]
 
 
 @lru_cache

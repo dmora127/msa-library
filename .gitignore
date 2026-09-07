@@ -33,6 +33,11 @@ tok.en
 .af3cache-monitoring.env
 **/.af3cache-monitoring.env
 
+# OSDF namespace registry (issuer URLs + key paths + capacities). The real
+# file is per-deployment; only the .example template is committed.
+namespaces.yaml
+deploy/jetstream2/namespaces.yaml
+
 # ...but the committed templates are not secrets
 !*.example
 

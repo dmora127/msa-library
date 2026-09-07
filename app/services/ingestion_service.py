@@ -22,9 +22,12 @@ from app.core.errors import (
     AlreadyCached,
     IngestionNotFound,
     SourceNotEnabled,
+    TokenIssuanceError,
     UploadTooLarge,
 )
 from app.core.hashing import normalize_sequence, sequence_hash
+from app.core.metrics import record_token_issue
+from app.core.namespaces import NamespaceRegistry
 from app.schemas.ingestion import (
     DEFAULT_SOURCE,
     UploadCompleteResponse,
@@ -33,6 +36,7 @@ from app.schemas.ingestion import (
 )
 from app.services.a3m_validator import A3mInvalid, A3mValidator
 from app.services.classifier import PENDING_CLASSIFICATION, Classifier
+from app.services.namespace_capacity import NamespaceCapacityGate
 from app.services.osdf_client import ObjectTooLarge, OsdfClient
 from app.services.sequence_service import SequenceService
 from app.services.settings_service import SettingsService
@@ -41,6 +45,11 @@ from app.services.token_issuer import TokenIssuer
 log = logging.getLogger("af3cache.ingestion")
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+# Once per process: "you have several namespaces but the template still
+# hardcodes one" is a config mistake that startup cannot see (the template is
+# DB-overridable), so it is flagged the first time an upload hits it.
+_warned_hardcoded_template = False
 
 
 def source_slug(source: str) -> str:
@@ -73,6 +82,8 @@ class IngestionService:
         a3m_validator: A3mValidator,
         sequence_service: SequenceService,
         classifier: Classifier,
+        namespaces: NamespaceRegistry,
+        capacity: NamespaceCapacityGate,
     ):
         self.session = session
         self.tokens = token_issuer
@@ -81,6 +92,48 @@ class IngestionService:
         self.a3m = a3m_validator
         self.sequences = sequence_service
         self.classifier = classifier
+        self.namespaces = namespaces
+        self.capacity = capacity
+
+    async def _pick_namespace(self, template: str, *, refuse_when_full: bool) -> str:
+        """Namespace for a NEW object: uniform random over the registry's
+        enabled entries that still have capacity headroom.
+
+        Empty candidates: enabled-but-all-full -> 507 namespace_full when
+        `refuse_when_full` (job uploads), else fall back to any enabled entry
+        with a warning (admin ingest: the object may already be on the origin,
+        and refusing would desync DB and store). No enabled entries at all ->
+        503 not_configured if the template needs {namespace}, else "" (the
+        template hardcodes the store, as the single-namespace default does).
+        """
+        global _warned_hardcoded_template
+        enabled = self.namespaces.enabled_namespaces()
+        if not enabled:
+            if "{namespace}" in template:
+                record_token_issue("not_configured")
+                raise TokenIssuanceError(
+                    "osdf_namespace_template needs {namespace} but no enabled "
+                    "OSDF namespace is configured (PELICAN_NAMESPACES_FILE)"
+                )
+            return ""
+        if len(enabled) > 1 and "{namespace}" not in template and not _warned_hardcoded_template:
+            _warned_hardcoded_template = True
+            log.warning(
+                "%d namespaces are enabled but osdf_namespace_template %r has no "
+                "{namespace}; every upload lands in the hardcoded store",
+                len(enabled), template,
+            )
+        accepting = await self.capacity.accepting(self.session)
+        candidates = [ns for ns in enabled if ns in accepting]
+        if candidates:
+            return random.choice(candidates)
+        if refuse_when_full:
+            raise self.capacity.refuse_all(await self.capacity.snapshot(self.session))
+        log.warning(
+            "every enabled namespace is within its headroom; admin ingest "
+            "proceeding into %s anyway", enabled,
+        )
+        return random.choice(enabled)
 
     @staticmethod
     def _resolve(req: UploadRequest) -> _Resolved:
@@ -164,10 +217,11 @@ class IngestionService:
             uri = existing.osdf_uri
         else:
             ingestion_id = str(uuid.uuid4())
-            # load-balance: pick one store at random (independent geo-distributed
+            # load-balance: pick one store at random among the enabled
+            # namespaces with capacity headroom (independent geo-distributed
             # namespaces — no sharding/replication, just spread the writes)
-            namespace = random.choice(
-                self.settings_service.settings.pelican_store_list
+            namespace = await self._pick_namespace(
+                eff.osdf_namespace_template, refuse_when_full=True
             )
             uri = eff.osdf_namespace_template.format(
                 namespace=namespace,
@@ -175,6 +229,13 @@ class IngestionService:
                 source_slug=source_slug(req.source),
                 ingestion_id=ingestion_id,
             )
+            # The capacity gate keys on the namespace the URI actually resolves
+            # to, so a hardcoded template is gated exactly like a {namespace}
+            # pick. Re-requests (the `existing` branch above) skip this: their
+            # declared bytes are already counted.
+            hit = self.namespaces.resolve(uri)
+            if hit is not None:
+                await self.capacity.check(self.session, hit[0])
 
         object_namespace = uri.rsplit("/", 1)[0]
         issued = await self.tokens.issue(
@@ -209,15 +270,17 @@ class IngestionService:
                               (id, status, seq_hash, seq_length, molecule_type,
                                source, db_version, requested_sequence,
                                declared_size_bytes, declared_sha256, osdf_uri,
+                               namespace,
                                token_ref, token_claim_jti, token_expires_at,
                                requester)
                             values
                               (:id, 'pending', :h, :len, :mt, :src, :dv, :rseq,
-                               :sz, :sha, :uri, :ref, :jti, :exp, :req)
+                               :sz, :sha, :uri, :ns, :ref, :jti, :exp, :req)
                             """
                         ),
                         {
                             "id": ingestion_id,
+                            "ns": self._namespace_of(uri),
                             "h": r.seq_hash,
                             "len": r.seq_length,
                             "mt": req.molecule_type,
@@ -633,13 +696,22 @@ class IngestionService:
             ingestion_id=ingestion_id, status="available", osdf_uri=row.osdf_uri
         )
 
-    def _mint_osdf_uri(self, template: str, ingestion_id: str, seq_hash: str,
-                       source: str) -> str:
+    def _namespace_of(self, osdf_uri: str) -> str | None:
+        """Registry namespace the URI lives in (what the token issuer will
+        derive too), for the msa_ingestions.namespace column. None when the
+        URI matches no configured namespace (legacy / unregistered stores)."""
+        hit = self.namespaces.resolve(osdf_uri)
+        return hit[0] if hit is not None else None
+
+    async def _mint_osdf_uri(self, template: str, ingestion_id: str,
+                             seq_hash: str, source: str) -> str:
         """Render osdf_namespace_template for a new ingestion row — the same
-        id-derived path the job upload path produces (see request_upload)."""
-        stores = self.settings_service.settings.pelican_store_list
+        id-derived path the job upload path produces (see request_upload).
+        Prefers namespaces with headroom but never refuses: admin ingest
+        describes an object that may already sit on the origin."""
+        namespace = await self._pick_namespace(template, refuse_when_full=False)
         return template.format(
-            namespace=random.choice(stores) if stores else "",
+            namespace=namespace,
             seq_hash=seq_hash,
             source_slug=source_slug(source),
             ingestion_id=ingestion_id,
@@ -710,7 +782,7 @@ class IngestionService:
             osdf_uri = req.osdf_uri
         else:
             eff = await self.settings_service.effective()
-            osdf_uri = self._mint_osdf_uri(
+            osdf_uri = await self._mint_osdf_uri(
                 eff.osdf_namespace_template, ingestion_id, seq_hash, req.source
             )
         try:
@@ -722,16 +794,18 @@ class IngestionService:
                           (id, status, seq_hash, seq_length, molecule_type,
                            source, db_version, requested_sequence,
                            declared_size_bytes, declared_sha256, osdf_uri,
+                           namespace,
                            token_ref, token_claim_jti, token_expires_at,
                            requester)
                         values
                           (:id, 'uploaded', :h, :len, :mt, :src, :dv, :rseq,
-                           :sz, :sha, :uri,
+                           :sz, :sha, :uri, :ns,
                            :ref, null, now(), :req)
                         """
                     ),
                     {
                         "id": ingestion_id, "h": seq_hash, "len": seq_length,
+                        "ns": self._namespace_of(osdf_uri),
                         "mt": req.molecule_type, "src": req.source,
                         "dv": req.db_version, "rseq": requested_sequence,
                         "sz": req.declared_size_bytes,

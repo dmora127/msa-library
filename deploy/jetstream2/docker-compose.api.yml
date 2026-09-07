@@ -38,9 +38,15 @@ services:
       # .env.api. NOTE: /opt/diamond MUST exist on the host (empty dir is fine
       # for noop classifier deployments — `sudo mkdir -p /opt/diamond`).
       - /opt/diamond:/opt/diamond:ro
-      # TOKEN_ISSUER_IMPL=pelican: the issuer's private key must be readable
-      # inside the container. Mount it read-only and point PELICAN_TOKEN_PRIVATE_KEY
-      # (.env.api) at the in-container path. Uncomment + adjust the host path:
+      # TOKEN_ISSUER_IMPL=pelican: the namespace registry (namespaces.yaml, copy
+      # of namespaces.yaml.example) lists every OSDF namespace with its issuer,
+      # private key path and capacity. PELICAN_NAMESPACES_FILE (.env.api) is
+      # the in-container path. The api validates it at startup and will NOT
+      # become healthy without it — and a missing host file makes Docker create
+      # an empty DIRECTORY here, which the api reports as such.
+      - ./namespaces.yaml:/etc/af3cache/namespaces.yaml:ro
+      # Every private_key the registry references must be mounted read-only at
+      # the in-container path the YAML names (one line per namespace):
       - /home/exouser/private-key.pem:/keys/community.pem:ro
       #
       # OSDF_CLIENT_IMPL=pelican: the pelican CLI itself is BAKED INTO the image

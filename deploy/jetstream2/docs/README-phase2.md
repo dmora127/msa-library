@@ -61,7 +61,7 @@ API_KEYS=$JOBKEY
 ADMIN_API_KEY=$ADMKEY
 TOKEN_ISSUER_IMPL=dryrun
 OSDF_CLIENT_IMPL=dryrun
-PELICAN_STORE_NAMESPACES=af3-msa-library
+PELICAN_NAMESPACES_FILE=/etc/af3cache/namespaces.yaml
 PUBLIC_HOST=${IP}.sslip.io
 CADDY_TLS=tls internal
 EOF
@@ -121,7 +121,10 @@ docker compose -f docker-compose.prod.yml -f docker-compose.api.yml \
   logs api | grep SIMULATE
 # "SIMULATE token issuance — would run: pelican token create \
 #  osdf:///af3-msa-library/community-contributed/<uuid>.a3m --write \
-#  --issuer <PELICAN_TOKEN_ISSUER> -k <PELICAN_TOKEN_PRIVATE_KEY> --lifetime 1200"
+#  --issuer <ISSUER for unconfigured namespace> -k <PRIVATE_KEY> \
+#  --scope-path <SCOPE_PATH> --lifetime 1200"
+# (placeholders until namespaces.yaml exists; with it, the real issuer, key
+#  path and --scope-path /community-contributed/<uuid>.a3m are logged)
 ```
 
 Then `POST https://$H/v1/uploads/<id>/complete` (with the job key) → status
@@ -154,15 +157,21 @@ binary. Order:
       - /home/exouser/private-key.pem:/keys/community.pem:ro     # issuer key
 ```
 
-**b. Flip `.env.api`:**
+**b. Write the namespace registry and flip `.env.api`:**
+
+```bash
+cp namespaces.yaml.example namespaces.yaml && chmod 600 namespaces.yaml
+# edit: issuer URL, private_key: /keys/community.pem, capacity_tb
+```
+(mounted by `docker-compose.api.yml` at `/etc/af3cache/namespaces.yaml`; the
+api will not start in pelican mode without a valid one)
 
 ```
 TOKEN_ISSUER_IMPL=pelican
 OSDF_CLIENT_IMPL=pelican
 PELICAN_TOKEN_BINARY=/usr/local/bin/pelican
 OSDF_PELICAN_BINARY=/usr/local/bin/pelican
-PELICAN_TOKEN_ISSUER=<issuer URL>
-PELICAN_TOKEN_PRIVATE_KEY=/keys/community.pem
+PELICAN_NAMESPACES_FILE=/etc/af3cache/namespaces.yaml
 ```
 
 **c. Recreate, then PROVE pelican works in-container before trusting it:**

@@ -301,3 +301,42 @@ async def test_admin_ingest_minted_uris_are_unique_per_row(
 async def test_admin_ingest_required_fields(client, payload):
     r = await client.post("/v1/admin/ingest", json=payload, headers=ADMIN)
     assert r.status_code == 422
+
+
+async def test_admin_ingest_prefers_room_but_never_refuses(
+    client, db_session, osdf_real_empty, registry_override
+):
+    # server-minted URI path (_mint_osdf_uri) uses the same picker as job
+    # uploads, but admin ingest describes an object that may already be on the
+    # origin, so an all-full registry warns and proceeds instead of 507.
+    from tests.conftest import NS_ISSUER
+
+    registry_override([
+        {"namespace": "af3-msa-library", "issuer": NS_ISSUER, "capacity_tb": 1},
+    ])
+    import uuid
+
+    await db_session.execute(
+        text(
+            """
+            insert into public.msa_ingestions
+              (status, seq_hash, seq_length, source, db_version, declared_size_bytes,
+               declared_sha256, osdf_uri, namespace, token_ref, token_expires_at)
+            values ('pending', :h, 5, 'Community Contributed - Cached', 'v1',
+                    950000000000, :sha, 'osdf:///af3-msa-library/x/full.a3m',
+                    'af3-msa-library', :ref, now())
+            """
+        ),
+        {"h": uuid.uuid4().hex * 2, "sha": "e" * 64, "ref": uuid.uuid4().hex},
+    )
+    body = _body(skip_verify=True)
+    body.pop("osdf_uri")
+    r = await client.post("/v1/admin/ingest", json=body, headers=ADMIN)
+    assert r.status_code == 200, r.text
+    ns = (
+        await db_session.execute(
+            text("select namespace from public.msa_ingestions where id = :id"),
+            {"id": r.json()["ingestion_id"]},
+        )
+    ).scalar_one()
+    assert ns == "af3-msa-library"  # column written on the admin path too

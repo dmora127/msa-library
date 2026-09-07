@@ -126,6 +126,32 @@ TOKEN_ISSUE_SECONDS = Histogram(
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
 )
 
+# --- namespace capacity gate ------------------------------------------------
+# Static facts from the namespace registry (YAML) plus the gate's own verdict.
+# Bytes actually used per namespace come from postgres-exporter
+# (af3cache_namespace_used_bytes, deploy/jetstream2/monitoring/postgres_queries.yaml)
+# per the DB-shaped-facts rule above; Grafana joins the two on `namespace`.
+NAMESPACE_CAPACITY_BYTES = Gauge(
+    "af3cache_namespace_capacity_bytes",
+    "Configured capacity of the OSDF namespace (decimal TB * 1e12).",
+    ["namespace"],
+)
+NAMESPACE_MIN_HEADROOM_PCT = Gauge(
+    "af3cache_namespace_min_headroom_pct",
+    "Headroom percentage at or below which the namespace stops accepting new uploads.",
+    ["namespace"],
+)
+NAMESPACE_ENABLED = Gauge(
+    "af3cache_namespace_enabled",
+    "1 if the namespace is enabled for new uploads in the registry, else 0.",
+    ["namespace"],
+)
+NAMESPACE_ACCEPTING = Gauge(
+    "af3cache_namespace_accepting",
+    "1 if the capacity gate currently lets new uploads into the namespace, else 0.",
+    ["namespace"],
+)
+
 # --- classifier -------------------------------------------------------------
 # DiamondClassifier returns UNCLASSIFIED on EVERY failure path and never raises,
 # so a broken diamond is invisible over HTTP. This separates "no hit" (a real
@@ -229,6 +255,21 @@ def record_token_issue(result: str, seconds: float | None = None) -> None:
     TOKEN_ISSUE.labels(result=result).inc()
     if seconds is not None:
         TOKEN_ISSUE_SECONDS.observe(seconds)
+
+
+@_safe
+def record_namespace_state(
+    namespace: str,
+    *,
+    capacity_bytes: int,
+    min_headroom_pct: float,
+    enabled: bool,
+    accepting: bool,
+) -> None:
+    NAMESPACE_CAPACITY_BYTES.labels(namespace=namespace).set(capacity_bytes)
+    NAMESPACE_MIN_HEADROOM_PCT.labels(namespace=namespace).set(min_headroom_pct)
+    NAMESPACE_ENABLED.labels(namespace=namespace).set(1 if enabled else 0)
+    NAMESPACE_ACCEPTING.labels(namespace=namespace).set(1 if accepting else 0)
 
 
 @_safe

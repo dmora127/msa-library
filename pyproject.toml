@@ -24,6 +24,9 @@ dependencies = [
     # degradation, pool saturation) need this library directly anyway, so the
     # wrapper would be an ADDITIONAL dependency rather than a replacement.
     "prometheus-client>=0.21",
+    # Namespace registry file (app/core/namespaces.py). Already pulled in
+    # transitively by uvicorn[standard]; declared so the import is not an accident.
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]

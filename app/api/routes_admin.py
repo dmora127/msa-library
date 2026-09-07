@@ -9,12 +9,15 @@ requirement, caching is a future optimization).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import require_admin_key
+from app.db.session import get_session
 from app.schemas.admin import (
     AdminConfig,
     AdminConfigUpdate,
     AdminIngestRequest,
+    NamespaceStatus,
     ReclassifyRequest,
     ReclassifyResponse,
     SourceInfo,
@@ -22,12 +25,14 @@ from app.schemas.admin import (
 )
 from app.schemas.ingestion import UploadCompleteResponse
 from app.services.deps import (
+    get_capacity_gate,
     get_ingestion_service,
     get_maintenance_service,
     get_settings_service,
 )
 from app.services.ingestion_service import IngestionService
 from app.services.maintenance_service import MaintenanceService
+from app.services.namespace_capacity import NamespaceCapacityGate
 from app.services.settings_service import SettingsService
 
 router = APIRouter(
@@ -70,6 +75,18 @@ async def update_config(
     if body.reap_grace_hours is not None:
         await svc.set("reap_grace_hours", str(body.reap_grace_hours), "admin")
     return await _current(svc)
+
+
+@router.get("/namespaces", response_model=list[NamespaceStatus])
+async def list_namespaces(
+    session: AsyncSession = Depends(get_session),
+    gate: NamespaceCapacityGate = Depends(get_capacity_gate),
+) -> list[NamespaceStatus]:
+    """Every configured OSDF namespace with its usage, capacity, headroom and
+    whether the capacity gate currently admits new uploads. Bypasses the gate's
+    60 s cache so an operator sees the live number."""
+    snap = await gate.snapshot(session, fresh=True)
+    return [NamespaceStatus(**vars(u)) for _, u in sorted(snap.items())]
 
 
 @router.get("/sources", response_model=list[SourceInfo])

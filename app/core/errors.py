@@ -48,6 +48,17 @@ class TokenIssuanceError(AppError):
     code = "token_issuance_failed"
 
 
+class NamespaceFull(AppError):
+    """Every enabled OSDF namespace is within its capacity headroom, so no
+    write token can be minted for a NEW upload. 507 (not 503) on purpose:
+    space does not free within a client retry window, so retrying is noise.
+    `extra` carries per-namespace usage so the job log says which store and
+    how full. Re-requests for rows that already exist are never refused."""
+
+    status_code = 507
+    code = "namespace_full"
+
+
 class AlreadyCached(AppError):
     """A live (active, non-idle) entry already exists for this
     (seq_hash, source, db_version). `extra` carries the existing osdf_uri so the

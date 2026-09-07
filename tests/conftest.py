@@ -135,6 +135,68 @@ async def client(db_session) -> AsyncGenerator:
     app.dependency_overrides.clear()
 
 
+NS_ISSUER = "https://issuer.test/api/v1.0/issuer/ns/af3-msa-library"
+
+
+@pytest.fixture
+def namespaces_yaml(tmp_path):
+    """Factory writing a namespaces.yaml plus fake key files under tmp_path.
+
+    `_write(entries=None, *, min_headroom_pct=None, filename=...)` returns the
+    file path. Entries default to the single live namespace; an entry may omit
+    `private_key` to get a generated fake key, or set it to a path of its own.
+    """
+    import yaml
+
+    def _key(name: str) -> str:
+        k = tmp_path / f"{name}.pem"
+        if not k.exists():
+            k.write_text("-----BEGIN FAKE KEY-----\nnot-a-real-key\n-----END FAKE KEY-----\n")
+        return str(k)
+
+    def _write(entries=None, *, min_headroom_pct=None, filename="namespaces.yaml"):
+        if entries is None:
+            entries = [{"namespace": "af3-msa-library", "issuer": NS_ISSUER,
+                        "capacity_tb": 50}]
+        out = []
+        for e in entries:
+            e = dict(e)
+            e.setdefault("private_key", _key(e["namespace"].replace("/", "_")))
+            out.append(e)
+        doc = {"namespaces": out}
+        if min_headroom_pct is not None:
+            doc["min_headroom_pct"] = min_headroom_pct
+        path = tmp_path / filename
+        path.write_text(yaml.safe_dump(doc, sort_keys=False))
+        return path
+
+    _write.key = _key
+    return _write
+
+
+@pytest.fixture
+def registry_override(namespaces_yaml):
+    """Install a NamespaceRegistry (built from `entries`) as the app's process
+    registry + capacity gate for one test. Returns the registry."""
+    from app.core.namespaces import load_namespaces
+    from app.main import app
+    from app.services.deps import get_capacity_gate, get_namespace_registry
+    from app.services.namespace_capacity import NamespaceCapacityGate
+
+    def _install(entries=None, *, min_headroom_pct=None, ttl_seconds=60):
+        reg = load_namespaces(
+            namespaces_yaml(entries, min_headroom_pct=min_headroom_pct), required=True
+        )
+        gate = NamespaceCapacityGate(reg, ttl_seconds)
+        app.dependency_overrides[get_namespace_registry] = lambda: reg
+        app.dependency_overrides[get_capacity_gate] = lambda: gate
+        return reg
+
+    yield _install
+    app.dependency_overrides.pop(get_namespace_registry, None)
+    app.dependency_overrides.pop(get_capacity_gate, None)
+
+
 @pytest.fixture
 def mint_token():
     """Factory minting WLCG-profile ES256 tokens signed by the session keypair.

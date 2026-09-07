@@ -11,12 +11,17 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.services.deps import get_token_issuer
+from app.services.deps import get_namespace_registry, get_token_issuer
 from app.services.token_issuer import JwksProvider
 
 
 def create_app() -> FastAPI:
     configure_logging()
+    # Fail fast: TOKEN_ISSUER_IMPL=pelican cannot mint anything without a valid
+    # namespace registry. Loading here (not lazily on the first upload) turns a
+    # bad file into a container that never becomes healthy instead of a 503
+    # storm to OSPool jobs. Cached, so get_token_issuer() below reuses it.
+    get_namespace_registry()
     app = FastAPI(title="af3-cache", version="0.1.0")
     register_exception_handlers(app)
     # CORS is owned HERE, not at the edge: the Caddyfile deliberately sets no

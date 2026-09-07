@@ -1,0 +1,53 @@
+# OSDF namespace registry for af3-cache — copy to namespaces.yaml (gitignored)
+# and bind-mount it into the api container (docker-compose.api.yml):
+#     - ./namespaces.yaml:/etc/af3cache/namespaces.yaml:ro
+# PELICAN_NAMESPACES_FILE (.env.api) is the in-container path.
+#
+# One entry per Pelican namespace (store) uploads may land in. This file
+# REPLACES the old PELICAN_TOKEN_ISSUER / PELICAN_TOKEN_PRIVATE_KEY /
+# PELICAN_STORE_NAMESPACES env vars. It is validated when the api starts:
+# a missing or invalid file, or an unreadable private_key, stops the container
+# (TOKEN_ISSUER_IMPL=pelican) instead of surfacing as 503s to OSPool jobs.
+#
+# Editing it needs `docker compose ... up -d --force-recreate api` — the file is
+# read once per process, and an in-place edit replaces the inode under a
+# running bind mount (same caveat as the Caddyfile).
+#
+# Fields
+#   namespace        path prefix under osdf:/// (may contain '/', e.g. osg/af3);
+#                    the token's --scope-path is the object path AFTER it.
+#   issuer           the namespace's token issuer, the `iss` claim byte-for-byte:
+#                    https://<origin>:<port>/api/v1.0/issuer/ns/<namespace>
+#   private_key      IN-CONTAINER path of the key that mints for that issuer.
+#                    Every key referenced here must also be bind-mounted
+#                    (host /home/<user>/private-key.pem -> /keys/community.pem:ro).
+#   capacity_tb      store capacity in decimal TB (1 TB = 1e12 bytes). Usage is
+#                    published objects (observed bytes) + in-flight uploads at
+#                    their declared size; see GET /v1/admin/namespaces.
+#   min_headroom_pct optional per-entry override of the top-level value.
+#   enabled          default true. false = DRAIN: no NEW uploads are placed
+#                    here, but tokens are still minted for existing rows that
+#                    already point at it. Never delete an entry that has rows —
+#                    disable it instead, or re-requests for those rows fail.
+#
+# Multiple namespaces only spread writes if OSDF_NAMESPACE_TEMPLATE (env, or
+# the app_settings override via PUT /v1/admin/config) contains {namespace};
+# the default template hardcodes af3-msa-library.
+
+# Percentage of free capacity at or below which a namespace stops accepting
+# NEW uploads (alerts: warning below 20%, critical below this value).
+min_headroom_pct: 10
+
+namespaces:
+  - namespace: af3-msa-library
+    issuer: https://kennesaw-origin.nationalresearchplatform.org:50093/api/v1.0/issuer/ns/af3-msa-library
+    private_key: /keys/community.pem
+    capacity_tb: 50
+
+  # A second store: its own issuer + key (mount it too), its own capacity.
+  # - namespace: af3-msa-west
+  #   issuer: https://west-origin.example.org:8443/api/v1.0/issuer/ns/af3-msa-west
+  #   private_key: /keys/af3-msa-west.pem
+  #   capacity_tb: 20
+  #   min_headroom_pct: 15
+  #   enabled: false

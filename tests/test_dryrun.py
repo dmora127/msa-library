@@ -12,24 +12,24 @@ from sqlalchemy import text
 from app.core.config import Settings
 from app.core.errors import OsdfUnavailable
 from app.core.hashing import sequence_hash
+from app.core.namespaces import NamespaceConfigError
 from app.services.osdf_client import DryRunOsdfClient, build_osdf_client
 from app.services.token_issuer import (
     JwksProvider,
     LoggingDryRunTokenIssuer,
     build_token_issuer,
 )
+from tests.conftest import NS_ISSUER
 
 KEY = {"X-API-Key": "test-key"}
 SHA = "a" * 64
 
 
-async def test_dryrun_token_issuer_logs_command_and_returns_synthetic(caplog):
+async def test_dryrun_token_issuer_logs_command_and_returns_synthetic(
+    caplog, namespaces_yaml
+):
     issuer = LoggingDryRunTokenIssuer(
-        Settings(
-            token_issuer_impl="dryrun",
-            pelican_token_issuer="https://issuer.test/",
-            pelican_token_private_key="/keys/community.pem",
-        )
+        Settings(token_issuer_impl="dryrun", pelican_namespaces_file=str(namespaces_yaml()))
     )
     uri = "osdf:///af3-msa-library/community-contributed/iid.a3m"
     with caplog.at_level(logging.INFO, logger="af3cache.tokens"):
@@ -37,12 +37,37 @@ async def test_dryrun_token_issuer_logs_command_and_returns_synthetic(caplog):
     assert tok.token.startswith("SIMULATED-TOKEN.")
     assert tok.token_ref and tok.claim_jti and tok.token_ref != tok.claim_jti
     assert not isinstance(issuer, JwksProvider)
+    key = namespaces_yaml.key("af3-msa-library")
     assert any(
-        f"pelican token create {uri} --write --issuer https://issuer.test/ "
-        "-k /keys/community.pem --lifetime 1200"
+        f"pelican token create {uri} --write --issuer {NS_ISSUER} -k {key} "
+        "--scope-path /community-contributed/iid.a3m --lifetime 1200"
         in r.message
         for r in caplog.records
     )
+
+
+async def test_dryrun_without_file_uses_placeholders(caplog, tmp_path):
+    # the "start on dryrun before the credential exists" workflow: no file, no raise
+    issuer = LoggingDryRunTokenIssuer(
+        Settings(token_issuer_impl="dryrun",
+                 pelican_namespaces_file=str(tmp_path / "absent.yaml"))
+    )
+    with caplog.at_level(logging.INFO, logger="af3cache.tokens"):
+        tok = await issuer.issue(
+            subject="job", object_uri="osdf:///af3-msa-library/x.a3m", ttl_seconds=5
+        )
+    assert tok.token.startswith("SIMULATED-TOKEN.")
+    msg = next(r.message for r in caplog.records if "would run" in r.message)
+    assert "--scope-path <SCOPE_PATH>" in msg and "<PRIVATE_KEY>" in msg
+
+
+def test_dryrun_invalid_file_raises(tmp_path):
+    bad = tmp_path / "ns.yaml"
+    bad.write_text("namespaces: [")
+    with pytest.raises(NamespaceConfigError):
+        LoggingDryRunTokenIssuer(
+            Settings(token_issuer_impl="dryrun", pelican_namespaces_file=str(bad))
+        )
 
 
 def test_dryrun_dispatch():

@@ -3,8 +3,10 @@
 `TokenIssuer.issue()` is issuer-agnostic so the impls are drop-in via
 TOKEN_ISSUER_IMPL (no router/service/schema/DB change):
 
-- pelican  (prod): shell out to `pelican token create --write --scope-path
-            <pelican://store/obj> --lifetime <ttl>`; stdout IS the token.
+- pelican  (prod): shell out to `pelican token create <uri> --write
+            --issuer <iss> --scope-path <path-sans-namespace> -k <key>
+            --lifetime <ttl>`; stdout IS the token. issuer/key/scope come from
+            the namespace registry (app/core/namespaces.py), never the director.
 - local    (dev) : self-sign a SciToken/WLCG JWT + publish JWKS.
 - stub     (test): deterministic fake.
 - oauth2   (v0.2): the origin's OAuth2 issuer.
@@ -37,6 +39,11 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from app.core.config import Settings
 from app.core.errors import TokenIssuanceError
 from app.core.metrics import record_token_issue
+from app.core.namespaces import (
+    EMPTY_REGISTRY,
+    NamespaceRegistry,
+    load_namespaces,
+)
 
 log = logging.getLogger("af3cache.tokens")
 
@@ -95,14 +102,37 @@ class StubTokenIssuer(TokenIssuer):
 
 
 def _pelican_argv(
-    binary: str, object_uri: str, issuer: str, private_key: str, ttl_seconds: int
+    binary: str,
+    object_uri: str,
+    *,
+    issuer: str,
+    private_key: str,
+    scope_path: str,
+    ttl_seconds: int,
 ) -> list[str]:
     """The `pelican token create` invocation, shared by the real + dryrun issuers
-    so the simulated log matches what production runs."""
+    so the simulated log matches what production runs.
+
+    --issuer AND --scope-path together are what let pelican skip its director
+    lookup (osdf-director, 10 s deadline): with both supplied it has nothing
+    left to discover and goes straight to signing.
+    """
     return [
         binary, "token", "create", object_uri, "--write",
-        "--issuer", issuer, "-k", private_key, "--lifetime", str(ttl_seconds),
+        "--issuer", issuer, "-k", private_key,
+        "--scope-path", scope_path, "--lifetime", str(ttl_seconds),
     ]
+
+
+def _redacted(argv: list[str]) -> str:
+    """argv for logs with the value after -k masked. The key PATH is not itself
+    a secret, but masking keeps the line grep-safe if inline key material is
+    ever passed instead."""
+    out = list(argv)
+    for i, a in enumerate(out[:-1]):
+        if a == "-k":
+            out[i + 1] = "<redacted>"
+    return " ".join(out)
 
 
 # Sync file helpers run via asyncio.to_thread so the async issuer never blocks
@@ -121,22 +151,38 @@ class LoggingDryRunTokenIssuer(TokenIssuer):
     (issuer key not ready yet) and returns a clearly-marked synthetic token. No
     JWKS. Swap to PelicanCliTokenIssuer once the issuer credential exists."""
 
-    def __init__(self, settings: Settings | None = None):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        namespaces: NamespaceRegistry | None = None,
+    ):
         self.binary = settings.pelican_token_binary if settings else "pelican"
-        self.issuer = (
-            (settings.pelican_token_issuer if settings else None)
-            or "<PELICAN_TOKEN_ISSUER>"
-        )
-        self.private_key = (
-            (settings.pelican_token_private_key if settings else None)
-            or "<PELICAN_TOKEN_PRIVATE_KEY>"
-        )
+        if namespaces is not None:
+            self.namespaces = namespaces
+        elif settings is not None:
+            # Absent file is fine in dryrun (the "start before creds exist"
+            # workflow); a present-but-invalid file still raises.
+            self.namespaces = load_namespaces(
+                settings.pelican_namespaces_file, required=False
+            )
+        else:
+            self.namespaces = EMPTY_REGISTRY
 
     async def issue(
         self, *, subject: str, object_uri: str, ttl_seconds: int
     ) -> IssuedToken:
+        hit = self.namespaces.resolve(object_uri)
+        if hit is not None:
+            ns, scope_path = hit
+            entry = self.namespaces.credentials_for(ns)
+            issuer, key = entry.issuer, entry.private_key
+        else:
+            issuer, key, scope_path = (
+                "<ISSUER for unconfigured namespace>", "<PRIVATE_KEY>", "<SCOPE_PATH>"
+            )
         argv = _pelican_argv(
-            self.binary, object_uri, self.issuer, self.private_key, ttl_seconds
+            self.binary, object_uri, issuer=issuer, private_key=key,
+            scope_path=scope_path, ttl_seconds=ttl_seconds,
         )
         log.info("SIMULATE token issuance — would run: %s", " ".join(argv))
         ref = uuid.uuid4().hex
@@ -154,36 +200,54 @@ class PelicanCliTokenIssuer(TokenIssuer):
     """Production: mint a scoped write token by running
 
         pelican token create <object_uri> --write --issuer <issuer>
-            -k <private_key> --lifetime <ttl>
+            --scope-path <path-sans-namespace> -k <private_key> --lifetime <ttl>
 
     stdout (the token) is captured to /tmp/<uuid>_<ts>.token, then read back and
-    returned (the file is removed afterward — it holds a live credential). The
-    host needs the pelican CLI and the issuer's private key authorized to mint
-    write tokens for the target namespace.
+    returned (the file is removed afterward — it holds a live credential).
+    issuer / key / scope_path come from the namespace registry entry the object
+    URI resolves to, so the container needs the pelican CLI plus every key the
+    registry references.
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(
+        self, settings: Settings, namespaces: NamespaceRegistry | None = None
+    ):
         self.binary = settings.pelican_token_binary
-        self.issuer = settings.pelican_token_issuer
-        self.private_key = settings.pelican_token_private_key
+        # Direct construction (tests, or anything bypassing deps) still
+        # validates: this is the startup gate for the pelican impl.
+        self.namespaces = (
+            namespaces
+            if namespaces is not None
+            else load_namespaces(settings.pelican_namespaces_file, required=True)
+        )
 
     async def issue(
         self, *, subject: str, object_uri: str, ttl_seconds: int
     ) -> IssuedToken:
         # `pelican token create` has no timeout and no retry. If this stops
         # succeeding no OSPool job can upload anything, while /healthz keeps
-        # reporting ok -- so every exit path below is counted by outcome.
+        # reporting ok -- so every exit path below is counted by outcome AND
+        # logged with pelican's stderr (a 503 alone told nobody why).
         _t0 = time.monotonic()
-        if not self.issuer:
+        hit = self.namespaces.resolve(object_uri)
+        if hit is None:
             record_token_issue("not_configured")
-            raise TokenIssuanceError("PELICAN_TOKEN_ISSUER is not configured")
-        if not self.private_key:
-            record_token_issue("not_configured")
-            raise TokenIssuanceError("PELICAN_TOKEN_PRIVATE_KEY is not configured")
-
+            log.warning(
+                "token issue FAILED not_configured: object uri %s matches no "
+                "configured namespace (configured: %s)",
+                object_uri, ", ".join(sorted(self.namespaces.entries)) or "-",
+            )
+            raise TokenIssuanceError(
+                "no configured namespace for object uri; check PELICAN_NAMESPACES_FILE"
+            )
+        ns, scope_path = hit
+        entry = self.namespaces.credentials_for(ns)  # disabled entries still mint
         argv = _pelican_argv(
-            self.binary, object_uri, self.issuer, self.private_key, ttl_seconds
+            self.binary, object_uri, issuer=entry.issuer,
+            private_key=entry.private_key, scope_path=scope_path,
+            ttl_seconds=ttl_seconds,
         )
+        log.debug("token issue: namespace=%s argv=%s", ns, _redacted(argv))
         out_path = os.path.join(
             "/tmp", f"{uuid.uuid4().hex}_{int(time.time())}.token"
         )
@@ -195,18 +259,29 @@ class PelicanCliTokenIssuer(TokenIssuer):
                     *argv, stdout=out_fh, stderr=asyncio.subprocess.PIPE,
                 )
             except FileNotFoundError as e:
-                record_token_issue("cli_missing", time.monotonic() - _t0)
+                elapsed = time.monotonic() - _t0
+                record_token_issue("cli_missing", elapsed)
+                log.warning(
+                    "token issue FAILED cli_missing namespace=%s binary=%s "
+                    "elapsed=%.2fs", ns, self.binary, elapsed,
+                )
                 raise TokenIssuanceError(
                     f"pelican CLI not found: {self.binary}"
                 ) from e
             finally:
                 out_fh.close()  # child inherited its own fd; close the parent's
             _, err = await proc.communicate()
+            stderr = err.decode(errors="replace").strip()
             if proc.returncode != 0:
-                record_token_issue("nonzero_exit", time.monotonic() - _t0)
+                elapsed = time.monotonic() - _t0
+                record_token_issue("nonzero_exit", elapsed)
+                log.warning(
+                    "token issue FAILED nonzero_exit namespace=%s rc=%s "
+                    "elapsed=%.2fs stderr=%r",
+                    ns, proc.returncode, elapsed, stderr[:500],
+                )
                 raise TokenIssuanceError(
-                    f"pelican token create exit {proc.returncode}: "
-                    f"{err.decode(errors='replace').strip()[:200]}"
+                    f"pelican token create exit {proc.returncode}: {stderr[:200]}"
                 )
             token = (await asyncio.to_thread(_read_text, out_path)).strip()
         finally:
@@ -214,10 +289,17 @@ class PelicanCliTokenIssuer(TokenIssuer):
                 os.unlink(out_path)
 
         if not token:
-            record_token_issue("empty_output", time.monotonic() - _t0)
+            elapsed = time.monotonic() - _t0
+            record_token_issue("empty_output", elapsed)
+            log.warning(
+                "token issue FAILED empty_output namespace=%s rc=0 elapsed=%.2fs "
+                "stderr=%r", ns, elapsed, stderr[:500],
+            )
             raise TokenIssuanceError("pelican token create produced no token")
 
-        record_token_issue("ok", time.monotonic() - _t0)
+        elapsed = time.monotonic() - _t0
+        record_token_issue("ok", elapsed)
+        log.debug("token issue ok namespace=%s elapsed=%.2fs", ns, elapsed)
 
         ref = uuid.uuid4().hex
         claims = _decode_unverified(token)
@@ -300,14 +382,18 @@ class LocalSigningTokenIssuer(TokenIssuer):
         return {"keys": [jwk]}
 
 
-def build_token_issuer(settings: Settings) -> TokenIssuer:
+def build_token_issuer(
+    settings: Settings, namespaces: NamespaceRegistry | None = None
+) -> TokenIssuer:
+    """`namespaces` is the process registry from deps; None makes the pelican /
+    dryrun impls load it themselves from settings.pelican_namespaces_file."""
     impl = settings.token_issuer_impl.lower()
     if impl == "stub":
         return StubTokenIssuer()
     if impl == "dryrun":
-        return LoggingDryRunTokenIssuer(settings)
+        return LoggingDryRunTokenIssuer(settings, namespaces)
     if impl == "pelican":
-        return PelicanCliTokenIssuer(settings)
+        return PelicanCliTokenIssuer(settings, namespaces)
     if impl == "local":
         return LocalSigningTokenIssuer(settings)
     if impl == "oauth2":  # pragma: no cover - v0.2

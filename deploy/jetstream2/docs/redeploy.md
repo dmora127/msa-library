@@ -161,19 +161,41 @@ grep -E '^(PUBLIC_HOST|API_KEYS|ADMIN_API_KEY|PGWEB_AUTH_PASS)=' .env.api
 `API_KEYS` is a comma-separated set, so rotation is: append the new key, restart
 `api`, hand it out, drop the old one later.
 
+The **namespace registry** is the other config file: every OSDF namespace
+uploads may land in, with its token issuer, private-key path and capacity.
+`.env.api` points at it (`PELICAN_NAMESPACES_FILE=/etc/af3cache/namespaces.yaml`,
+the in-container path of the bind mount below):
+
+```bash
+cp namespaces.yaml.example namespaces.yaml && chmod 600 namespaces.yaml
+$EDITOR namespaces.yaml     # issuer URL, /keys/... path, capacity_tb per namespace
+```
+
+The api validates it at startup — in `pelican` mode a missing/invalid file, or
+an unreadable key, means the container never becomes healthy (by design: a
+503 storm to OSPool jobs is worse). `dryrun` tolerates an absent file.
+
 ## Phase 5 — Host assets the repo cannot carry
 
-`docker-compose.api.yml` bind-mounts six host paths. **All must exist**, or
+`docker-compose.api.yml` bind-mounts seven host paths. **All must exist**, or
 Docker creates empty directories over them (which, for the two key files, then
-breaks ssh with "not a regular file").
+breaks ssh with "not a regular file", and for `namespaces.yaml` makes the api
+refuse to start with "is a directory").
 
 ```bash
 sudo mkdir -p /opt/diamond          # required even for CLASSIFIER_IMPL=noop
 sudo mkdir -p /mnt/pgdata/similarity && sudo chown "$USER" /mnt/pgdata/similarity
 ssh-keygen -t ed25519 -N "" -C "af3cache-api reclass $(hostname)" -f ~/.ssh/reclass_ed25519
 ssh-keyscan -t ed25519 <blast-box-ip> > ~/.ssh/reclass_known_hosts
-ls -l ~/private-key.pem ~/.config/pelican ~/.ssh/reclass_ed25519 ~/.ssh/reclass_known_hosts
+ls -l ~/private-key.pem ~/.config/pelican ~/.ssh/reclass_ed25519 ~/.ssh/reclass_known_hosts \
+      /opt/af3-cache/deploy/jetstream2/namespaces.yaml
 ```
+
+- **`namespaces.yaml`** (repo-relative, Phase 4) — mounted at
+  `/etc/af3cache/namespaces.yaml`. Every `private_key` it names must ALSO be
+  mounted at that in-container path (one `volumes:` line per namespace key).
+  Editing it later needs `up -d --force-recreate api` (same inode caveat as
+  the Caddyfile).
 
 - **`/mnt/pgdata/similarity`** — `SIMILARITY_DB_ROOT` for the MMseqs2 snapshot
   mode (nightly/delta generations + symlinks). Empty is fine; unused while
@@ -193,7 +215,7 @@ ls -l ~/private-key.pem ~/.config/pelican ~/.ssh/reclass_ed25519 ~/.ssh/reclass_
   (`chmod 400` the key, `chmod -R go-rwx` the config dir), or mint a fresh
   issuer keypair and register it with the OSDF origin. If the new VM runs
   `dryrun`, comment out those two `volumes:` lines in `docker-compose.api.yml`
-  instead — nothing reads them.
+  instead — nothing reads them (the `namespaces.yaml` mount can stay).
 
 Note the host paths in `docker-compose.api.yml` are hardcoded to
 `/home/exouser/...`; adjust if the account differs.
@@ -604,8 +626,49 @@ docker compose -f deploy/jetstream2/docker-compose.prod.yml \
                -f deploy/jetstream2/docker-compose.api.yml up -d --build api
 ```
 
-`.env.api` / `.env.prod` sit inside the tree but are gitignored, so a pull never
-touches them. Do not rsync over a git working tree.
+`.env.api` / `.env.prod` / `namespaces.yaml` sit inside the tree but are
+gitignored, so a pull never touches them. Do not rsync over a git working tree.
+
+If the update carries a migration (a new file under `migrations/versions/`),
+run it BEFORE starting the new image — new code may insert into columns the
+old schema lacks. For a migration that rewrites a big table (0016 backfills
+`msa_ingestions.namespace` and builds an index: seconds, but it blocks writes
+to that table meanwhile) stop the api first so the whole outage is one window:
+
+```bash
+docker compose -f deploy/jetstream2/docker-compose.prod.yml \
+               -f deploy/jetstream2/docker-compose.api.yml stop api
+docker compose -f deploy/jetstream2/docker-compose.prod.yml --profile tools run --rm migrate
+docker compose -f deploy/jetstream2/docker-compose.prod.yml \
+               -f deploy/jetstream2/docker-compose.api.yml up -d --build api
+docker exec af3cache-db-1 psql -U af3 -d af3cache -c 'vacuum analyze public.msa_ingestions'
+```
+
+## Adding a second OSDF namespace
+
+1. Get the namespace's issuer URL (`https://<origin>:<port>/api/v1.0/issuer/ns/<namespace>`)
+   and the private key that mints for it; put the key on the host and add a
+   `volumes:` line in `docker-compose.api.yml` mounting it read-only under
+   `/keys/`.
+2. Add the entry to `namespaces.yaml` (`namespace`, `issuer`, `private_key`
+   = the in-container path, `capacity_tb`; keep `enabled: false` until the
+   origin has been proven with a manual `pelican token create ... --issuer
+   ... --scope-path ...` + `pelican object put` from inside the container).
+3. `docker compose -f ... -f ... -f ... up -d --force-recreate api`; the
+   startup log lists the loaded namespaces.
+4. Make the template spread writes: the live `osdf_namespace_template`
+   hardcodes `af3-msa-library`, so nothing lands in the new store until it
+   contains `{namespace}` —
+   `PUT /v1/admin/config {"osdf_namespace_template": "osdf:///{namespace}/community-contributed/{ingestion_id}.a3m"}`
+   (the validator also wants `{seq_hash}` and `{source_slug}`; any layout
+   that keeps `{ingestion_id}` unique per object is fine).
+5. Flip `enabled: true`, recreate `api` again, then watch
+   `GET /v1/admin/namespaces` and the "af3-cache namespaces" dashboard: new
+   objects should appear under both stores, headroom alerts stay Normal.
+
+Draining a store is the reverse: `enabled: false` + recreate. Its rows keep
+re-requesting tokens; it just receives nothing new. Never delete an entry
+that still has `msa_ingestions` rows.
 
 ## Pitfalls
 

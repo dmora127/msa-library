@@ -105,3 +105,30 @@ af3cache_reclass_jobs:
   metrics:
     - status: { usage: "LABEL", description: "QUEUED | RUNNING | DONE | FAILED | KILLED | UNKNOWN" }
     - count:  { usage: "GAUGE", description: "reclassification jobs by status" }
+
+# Per-OSDF-namespace usage for the capacity gate's dashboard + alerts
+# (grafana/dashboards/af3cache-namespaces.json, af3-namespace-headroom-*).
+# used_bytes = observed bytes of published objects that still have a cache
+# entry (reaped ones drop out via the FK) + DECLARED bytes of in-flight rows,
+# which reserve their space before the object exists. This query text is
+# pinned byte-for-byte (modulo whitespace) to NAMESPACE_USAGE_SQL in
+# app/services/namespace_capacity.py by tests/test_namespace_capacity.py, so
+# the API's gate and this exporter can never disagree about "used". Capacity,
+# enabled and accepting come from the app's /metrics (af3cache_namespace_*);
+# Grafana joins on `namespace`. Index-only scan over
+# msa_ingestions_namespace_status_idx (migration 0016): tens of ms at 750k rows.
+af3cache_namespace:
+  query: >
+    select namespace,
+           count(*) filter (where status = 'available' and cache_entry_id is not null) as available_count,
+           count(*) filter (where status in ('pending','uploaded'))                    as inflight_count,
+           coalesce(sum(observed_size_bytes) filter (where status = 'available' and cache_entry_id is not null), 0)
+         + coalesce(sum(declared_size_bytes) filter (where status in ('pending','uploaded')), 0) as used_bytes
+      from public.msa_ingestions
+     where namespace is not null and status in ('pending','uploaded','available')
+     group by namespace
+  metrics:
+    - namespace:       { usage: "LABEL", description: "OSDF namespace (registry key)" }
+    - available_count: { usage: "GAUGE", description: "published objects still holding a cache entry" }
+    - inflight_count:  { usage: "GAUGE", description: "pending + uploaded rows (space reserved at declared size)" }
+    - used_bytes:      { usage: "GAUGE", description: "bytes counted against the namespace's capacity" }
