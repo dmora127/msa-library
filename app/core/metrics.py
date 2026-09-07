@@ -113,16 +113,19 @@ OSDF_WAITING = Gauge(
 )
 
 # --- token issuance ---------------------------------------------------------
-# `pelican token create` has no timeout and no retry. If this stops succeeding,
-# no OSPool job can upload anything -- and /healthz still reports ok.
+# If minting stops succeeding, no OSPool job can upload anything -- and
+# /healthz still reports ok. Shared by the pelican issuer (`pelican token
+# create`: no timeout, no retry) and the inprocess issuer (PyJWT signing).
 TOKEN_ISSUE = Counter(
     "af3cache_token_issue_total",
     "Write-token issuance attempts by outcome.",
-    ["result"],  # ok | not_configured | cli_missing | nonzero_exit | empty_output
+    # ok | not_configured | cli_missing | nonzero_exit | empty_output (pelican)
+    # | sign_error (inprocess)
+    ["result"],
 )
 TOKEN_ISSUE_SECONDS = Histogram(
     "af3cache_token_issue_seconds",
-    "Duration of `pelican token create`.",
+    "Duration of one write-token mint (pelican token create or in-process signing).",
     buckets=(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
 )
 

@@ -23,11 +23,12 @@ Format (deploy/jetstream2/namespaces.yaml.example):
         enabled: true                         # false = drain: no NEW uploads
 
 `resolve()` is the one place that turns an object URI into (namespace,
-scope_path). The token issuer passes scope_path to `pelican token create
---scope-path`, which is what lets pelican skip its director lookup (the
-director round-trip has a 10 s deadline and was the source of most nonzero
-exits). Disabled entries keep their credentials: an ingestion row that already
-points at a drained namespace must still be able to re-request its token.
+scope_path). The inprocess issuer signs `storage.create:<scope_path>` directly;
+the pelican issuer passes it as `--scope-path`, which does not skip pelican's
+director lookup (10 s cap) but makes a director failure non-fatal instead of
+the "Failed to get director info" exit that caused most nonzero exits.
+Disabled entries keep their credentials: an ingestion row that already points
+at a drained namespace must still be able to re-request its token.
 """
 
 from __future__ import annotations
@@ -185,8 +186,9 @@ EMPTY_REGISTRY = NamespaceRegistry(entries={})
 
 
 def namespaces_required(settings) -> bool:
-    """The pelican issuer cannot mint anything without the file."""
-    return settings.token_issuer_impl.lower() == "pelican"
+    """The pelican and inprocess issuers cannot mint anything without the
+    file (issuer URL + private key per namespace live only here)."""
+    return settings.token_issuer_impl.lower() in ("pelican", "inprocess")
 
 
 def _check_private_key(entry: NamespaceEntry, path: str) -> None:

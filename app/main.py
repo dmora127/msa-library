@@ -17,7 +17,7 @@ from app.services.token_issuer import JwksProvider
 
 def create_app() -> FastAPI:
     configure_logging()
-    # Fail fast: TOKEN_ISSUER_IMPL=pelican cannot mint anything without a valid
+    # Fail fast: TOKEN_ISSUER_IMPL=pelican/inprocess cannot mint without a valid
     # namespace registry. Loading here (not lazily on the first upload) turns a
     # bad file into a container that never becomes healthy instead of a 503
     # storm to OSPool jobs. Cached, so get_token_issuer() below reuses it.

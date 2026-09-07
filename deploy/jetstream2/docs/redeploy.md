@@ -171,9 +171,23 @@ cp namespaces.yaml.example namespaces.yaml && chmod 600 namespaces.yaml
 $EDITOR namespaces.yaml     # issuer URL, /keys/... path, capacity_tb per namespace
 ```
 
-The api validates it at startup — in `pelican` mode a missing/invalid file, or
-an unreadable key, means the container never becomes healthy (by design: a
-503 storm to OSPool jobs is worse). `dryrun` tolerates an absent file.
+The api validates it at startup — in `inprocess` / `pelican` mode a
+missing/invalid file, or an unreadable key, means the container never becomes
+healthy (by design: a 503 storm to OSPool jobs is worse); `inprocess` also
+refuses a key it cannot parse or that is not EC P-256 / RSA. `dryrun`
+tolerates an absent file.
+
+**Token issuer flip / rollback.** `inprocess` (sign in process with the
+registry key) and `pelican` (shell out to `pelican token create`, which waits
+on the OSDF director first) produce the same token; both impls and the pelican
+CLI are in every image, so switching is one env line, no rebuild:
+
+```bash
+sed -i 's#^TOKEN_ISSUER_IMPL=.*#TOKEN_ISSUER_IMPL=inprocess#' .env.api   # or =pelican to roll back
+docker compose -f docker-compose.prod.yml -f docker-compose.api.yml up -d api
+docker compose -f docker-compose.prod.yml -f docker-compose.api.yml logs api | grep "inprocess issuer"
+# kid=… must match a key in <issuer>/.well-known/issuer.jwks
+```
 
 ## Phase 5 — Host assets the repo cannot carry
 
@@ -210,8 +224,9 @@ ls -l ~/private-key.pem ~/.config/pelican ~/.ssh/reclass_ed25519 ~/.ssh/reclass_
   copy the ~3 GB binary + SwissProt DB from an existing instance:
   `rsync -avz /opt/diamond/ <user>@<new-ip>:/tmp/diamond/` then
   `sudo mv /tmp/diamond /opt/diamond`.
-- **`~/.config/pelican` and `~/private-key.pem`** — only needed in `pelican`
-  mode. Not reproducible; copy from an existing instance
+- **`~/.config/pelican` and `~/private-key.pem`** — the key is needed whenever
+  tokens are minted for real (`TOKEN_ISSUER_IMPL=inprocess` or `pelican`), the
+  config dir whenever `OSDF_CLIENT_IMPL=pelican`. Not reproducible; copy from an existing instance
   (`chmod 400` the key, `chmod -R go-rwx` the config dir), or mint a fresh
   issuer keypair and register it with the OSDF origin. If the new VM runs
   `dryrun`, comment out those two `volumes:` lines in `docker-compose.api.yml`

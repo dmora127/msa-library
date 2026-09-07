@@ -46,8 +46,9 @@ class Settings(BaseSettings):
     jwt_clock_skew_seconds: int = 60
     jwt_allowed_past_exp_seconds: int = 0
 
-    # Token issuer: pelican (prod: `pelican token create`) | local (self-sign,
-    # dev) | stub (tests) | oauth2 (v0.2)
+    # Token issuer: inprocess (prod: sign the WLCG JWT in process with the
+    # registry key) | pelican (prod fallback: `pelican token create`) | local
+    # (self-sign, dev) | stub (tests) | dryrun | oauth2 (v0.2)
     token_issuer_impl: str = "pelican"
     token_issuer_url: str = "https://af3-cache.local/"
     token_audience: str = "https://osdf-origin.example/"
@@ -59,11 +60,14 @@ class Settings(BaseSettings):
     #   pelican token create <object_uri> --write --issuer <issuer>
     #       --scope-path <path-sans-namespace> -k <private_key> --lifetime <ttl>
     # issuer / key / capacity come from the namespace registry below, one entry
-    # per OSDF namespace (store). Passing --issuer AND --scope-path lets pelican
-    # skip its director lookup (10 s deadline, the source of most mint failures).
+    # per OSDF namespace (store). pelican still queries the OSDF director before
+    # signing (10 s cap); --issuer + --scope-path only make a director failure
+    # non-fatal. `inprocess` signs the identical token from the same registry
+    # entry with no network at all.
     #
-    # Namespace registry (YAML). REQUIRED when TOKEN_ISSUER_IMPL=pelican and
-    # validated at app construction (a bad file stops the container). Optional
+    # Namespace registry (YAML). REQUIRED when TOKEN_ISSUER_IMPL is pelican or
+    # inprocess and validated at app construction (a bad file, or for inprocess
+    # an unparseable / non-P-256 key, stops the container). Optional
     # otherwise: dryrun logs the same argv from it when present, and the
     # {namespace} pick for uploads uses its enabled entries.
     # Format: deploy/jetstream2/namespaces.yaml.example

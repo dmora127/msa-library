@@ -46,8 +46,9 @@ def get_sequence_service(
 @lru_cache
 def get_namespace_registry() -> NamespaceRegistry:
     """Process-singleton: the YAML namespace registry. Required (and validated,
-    raising NamespaceConfigError) when TOKEN_ISSUER_IMPL=pelican; an absent
-    file is an empty registry otherwise. Editing the file needs a restart."""
+    raising NamespaceConfigError) when TOKEN_ISSUER_IMPL is pelican or
+    inprocess; an absent file is an empty registry otherwise. Editing the file
+    needs a restart."""
     s = get_settings()
     return load_namespaces(s.pelican_namespaces_file, required=namespaces_required(s))
 

@@ -3,10 +3,13 @@
 `TokenIssuer.issue()` is issuer-agnostic so the impls are drop-in via
 TOKEN_ISSUER_IMPL (no router/service/schema/DB change):
 
-- pelican  (prod): shell out to `pelican token create <uri> --write
+- inprocess (prod): sign the same WLCG JWT pelican would, in process with
+            PyJWT -- issuer/key/scope from the namespace registry
+            (app/core/namespaces.py), kid = RFC 7638 thumbprint. No network.
+- pelican  (prod, fallback): shell out to `pelican token create <uri> --write
             --issuer <iss> --scope-path <path-sans-namespace> -k <key>
-            --lifetime <ttl>`; stdout IS the token. issuer/key/scope come from
-            the namespace registry (app/core/namespaces.py), never the director.
+            --lifetime <ttl>`; stdout IS the token. pelican still queries the
+            OSDF director first (10 s cap); the flags only make that non-fatal.
 - local    (dev) : self-sign a SciToken/WLCG JWT + publish JWKS.
 - stub     (test): deterministic fake.
 - oauth2   (v0.2): the origin's OAuth2 issuer.
@@ -15,14 +18,17 @@ TOKEN_ISSUER_IMPL (no router/service/schema/DB change):
 ties the issuance to its msa_ingestions row). `claim_jti` / `expires_at` are the
 token's own jti / exp when discoverable, else best-effort. `jwks()` is NOT on
 the ABC — only LocalSigningTokenIssuer is a JwksProvider, and the JWKS route is
-mounted conditionally on that.
+mounted conditionally on that (inprocess deliberately is not one: the origin's
+JWKS is authoritative for the registry issuers).
 """
 
 from __future__ import annotations
 
 import abc
 import asyncio
+import base64
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -34,6 +40,8 @@ from typing import Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 import jwt
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
 
 from app.core.config import Settings
@@ -41,6 +49,7 @@ from app.core.errors import TokenIssuanceError
 from app.core.metrics import record_token_issue
 from app.core.namespaces import (
     EMPTY_REGISTRY,
+    NamespaceConfigError,
     NamespaceRegistry,
     load_namespaces,
 )
@@ -113,9 +122,12 @@ def _pelican_argv(
     """The `pelican token create` invocation, shared by the real + dryrun issuers
     so the simulated log matches what production runs.
 
-    --issuer AND --scope-path together are what let pelican skip its director
-    lookup (osdf-director, 10 s deadline): with both supplied it has nothing
-    left to discover and goes straight to signing.
+    pelican 7.25 ALWAYS does federation discovery + a director lookup under a
+    10 s cap (and a JWKS fetch from the issuer) before signing. --issuer and
+    --scope-path do not skip that; they only turn a director failure into a
+    warning instead of a fatal "Failed to get director info" exit. A slow
+    director therefore still costs seconds per mint -- the reason the
+    `inprocess` issuer exists.
     """
     return [
         binary, "token", "create", object_uri, "--write",
@@ -382,11 +394,198 @@ class LocalSigningTokenIssuer(TokenIssuer):
         return {"keys": [jwk]}
 
 
+# ---------------------------------------------------------------------------
+# In-process signing (TOKEN_ISSUER_IMPL=inprocess)
+# ---------------------------------------------------------------------------
+
+WLCG_ANY_AUDIENCE = "https://wlcg.cern.ch/jwt/v1/any"
+# pelican runs as root in the container and falls back to this subject.
+PELICAN_SUBJECT = "pelican_client"
+
+
+def _b64url(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _jwk_thumbprint(pub) -> str:
+    """RFC 7638 SHA-256 JWK thumbprint -- the `kid` pelican puts in its token
+    header, and the name the origin's JWKS files our public key under. Only the
+    required members, lexicographic order, no whitespace; EC coordinates are
+    zero-padded to the curve width, RSA integers are minimal big-endian."""
+    if isinstance(pub, ec.EllipticCurvePublicKey):
+        n = pub.public_numbers()
+        size = (pub.curve.key_size + 7) // 8
+        members = {
+            "crv": "P-256", "kty": "EC",
+            "x": _b64url(n.x.to_bytes(size, "big")),
+            "y": _b64url(n.y.to_bytes(size, "big")),
+        }
+    elif isinstance(pub, rsa.RSAPublicKey):
+        n = pub.public_numbers()
+        members = {
+            "e": _b64url(n.e.to_bytes((n.e.bit_length() + 7) // 8, "big")),
+            "kty": "RSA",
+            "n": _b64url(n.n.to_bytes((n.n.bit_length() + 7) // 8, "big")),
+        }
+    else:  # pragma: no cover - _load_signing_key filters key types first
+        raise TypeError(f"unsupported public key type {type(pub).__name__}")
+    canon = json.dumps(members, sort_keys=True, separators=(",", ":")).encode()
+    return _b64url(hashlib.sha256(canon).digest())
+
+
+@dataclass(frozen=True)
+class _SigningKey:
+    key: ec.EllipticCurvePrivateKey | rsa.RSAPrivateKey
+    alg: str  # ES256 | RS256
+    kid: str
+    path: str
+
+
+def _load_signing_key(path: str, namespace: str) -> _SigningKey:
+    """Parse one registry private key. Raises NamespaceConfigError (the startup
+    gate) for anything the origin could not verify: unparseable / encrypted
+    PEM, a non-P-256 EC curve (ES256 is the only EC alg we emit), or an
+    unsupported key type."""
+    try:
+        with open(path, "rb") as fh:
+            key = serialization.load_pem_private_key(fh.read(), password=None)
+    except (OSError, ValueError, TypeError, UnsupportedAlgorithm) as e:
+        raise NamespaceConfigError(
+            f"namespace {namespace!r}: private_key {path!r} is not an "
+            f"unencrypted PEM private key: {e}"
+        ) from e
+    if isinstance(key, ec.EllipticCurvePrivateKey):
+        if not isinstance(key.curve, ec.SECP256R1):
+            raise NamespaceConfigError(
+                f"namespace {namespace!r}: EC private_key {path!r} must be "
+                f"P-256 for ES256 (got {key.curve.name})"
+            )
+        alg = "ES256"
+    elif isinstance(key, rsa.RSAPrivateKey):
+        alg = "RS256"
+    else:
+        raise NamespaceConfigError(
+            f"namespace {namespace!r}: private_key {path!r} has unsupported "
+            f"key type {type(key).__name__} (need EC P-256 or RSA)"
+        )
+    return _SigningKey(
+        key=key, alg=alg, kid=_jwk_thumbprint(key.public_key()), path=path
+    )
+
+
+class InProcessTokenIssuer(TokenIssuer):
+    """Production: sign the same WLCG JWT `pelican token create` would, in
+    process with PyJWT. No subprocess, no director, no network.
+
+    Claims are byte-for-byte what pelican 7.25 emits for `--write` with the
+    registry's issuer and key (aud = WLCG "any", sub = pelican_client, scope =
+    storage.create:<scope_path>, wlcg.ver 1.0, kid = RFC 7638 thumbprint), so
+    the origin cannot tell the two apart. Keys are parsed once at construction
+    -- the startup gate -- and a rotated key needs a container restart.
+
+    Deliberately NOT a JwksProvider: the origin's own JWKS is authoritative for
+    these issuers, and a `jwks()` method here would mount /.well-known/jwks.json
+    in production.
+    """
+
+    def __init__(
+        self, settings: Settings, namespaces: NamespaceRegistry | None = None
+    ):
+        self.namespaces = (
+            namespaces
+            if namespaces is not None
+            else load_namespaces(settings.pelican_namespaces_file, required=True)
+        )
+        if not self.namespaces.entries:
+            raise NamespaceConfigError(
+                "TOKEN_ISSUER_IMPL=inprocess needs at least one namespace in "
+                "PELICAN_NAMESPACES_FILE"
+            )
+        by_path: dict[str, _SigningKey] = {}
+        self._keys: dict[str, _SigningKey] = {}
+        for ns, entry in self.namespaces.entries.items():  # disabled included
+            sk = by_path.get(entry.private_key)
+            if sk is None:
+                sk = _load_signing_key(entry.private_key, ns)
+                by_path[entry.private_key] = sk
+            self._keys[ns] = sk
+            # kid is what to compare against <issuer>/.well-known JWKS after a
+            # key rotation; the key itself is never logged.
+            log.info(
+                "inprocess issuer: namespace=%s alg=%s kid=%s iss=%s",
+                ns, sk.alg, sk.kid, entry.issuer,
+            )
+
+    def kid_for(self, namespace: str) -> str | None:
+        sk = self._keys.get(namespace)
+        return sk.kid if sk else None
+
+    async def issue(
+        self, *, subject: str, object_uri: str, ttl_seconds: int
+    ) -> IssuedToken:
+        _t0 = time.monotonic()
+        hit = self.namespaces.resolve(object_uri)
+        if hit is None:
+            record_token_issue("not_configured")
+            log.warning(
+                "token issue FAILED not_configured: object uri %s matches no "
+                "configured namespace (configured: %s)",
+                object_uri, ", ".join(sorted(self.namespaces.entries)) or "-",
+            )
+            raise TokenIssuanceError(
+                "no configured namespace for object uri; check PELICAN_NAMESPACES_FILE"
+            )
+        ns, scope_path = hit
+        entry = self.namespaces.credentials_for(ns)  # disabled entries still mint
+        sk = self._keys[ns]
+        now = int(time.time())
+        exp = now + int(ttl_seconds)
+        jti = _b64url(os.urandom(16))
+        payload = {
+            "aud": [WLCG_ANY_AUDIENCE],
+            "exp": exp,
+            "iat": now,
+            "nbf": now,
+            "iss": entry.issuer,
+            "jti": jti,
+            "scope": f"storage.create:{scope_path}",
+            "sub": PELICAN_SUBJECT,
+            "wlcg.ver": "1.0",
+        }
+        try:
+            token = jwt.encode(
+                payload, sk.key, algorithm=sk.alg, headers={"kid": sk.kid}
+            )
+        except Exception as e:  # noqa: BLE001 - counted, logged, surfaced as 503
+            elapsed = time.monotonic() - _t0
+            record_token_issue("sign_error", elapsed)
+            log.warning(
+                "token issue FAILED sign_error namespace=%s alg=%s kid=%s "
+                "elapsed=%.3fs err=%r", ns, sk.alg, sk.kid, elapsed, e,
+            )
+            raise TokenIssuanceError(
+                f"in-process signing failed: {type(e).__name__}"
+            ) from e
+        elapsed = time.monotonic() - _t0
+        record_token_issue("ok", elapsed)
+        log.debug(
+            "token issue ok namespace=%s subject=%s kid=%s elapsed=%.4fs",
+            ns, subject, sk.kid, elapsed,
+        )
+        return IssuedToken(
+            token=token,
+            token_ref=uuid.uuid4().hex,
+            expires_at=datetime.fromtimestamp(exp, UTC),
+            claim_jti=jti,
+        )
+
+
 def build_token_issuer(
     settings: Settings, namespaces: NamespaceRegistry | None = None
 ) -> TokenIssuer:
     """`namespaces` is the process registry from deps; None makes the pelican /
-    dryrun impls load it themselves from settings.pelican_namespaces_file."""
+    inprocess / dryrun impls load it themselves from
+    settings.pelican_namespaces_file."""
     impl = settings.token_issuer_impl.lower()
     if impl == "stub":
         return StubTokenIssuer()
@@ -394,6 +593,8 @@ def build_token_issuer(
         return LoggingDryRunTokenIssuer(settings, namespaces)
     if impl == "pelican":
         return PelicanCliTokenIssuer(settings, namespaces)
+    if impl == "inprocess":
+        return InProcessTokenIssuer(settings, namespaces)
     if impl == "local":
         return LocalSigningTokenIssuer(settings)
     if impl == "oauth2":  # pragma: no cover - v0.2

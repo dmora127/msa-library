@@ -232,8 +232,8 @@ def test_resolve(names, uri, expected):
     assert _reg(*names).resolve(uri) == expected
 
 
-def test_namespaces_required_only_for_pelican():
-    assert namespaces_required(Settings(token_issuer_impl="pelican"))
-    assert namespaces_required(Settings(token_issuer_impl="Pelican"))
+def test_namespaces_required_for_pelican_and_inprocess():
+    for impl in ("pelican", "Pelican", "inprocess", "INPROCESS"):
+        assert namespaces_required(Settings(token_issuer_impl=impl))
     for impl in ("stub", "dryrun", "local"):
         assert not namespaces_required(Settings(token_issuer_impl=impl))

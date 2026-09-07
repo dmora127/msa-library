@@ -103,14 +103,20 @@ All `/v1/*` require a static API key (`X-API-Key:` or `Authorization: Bearer`).
 `TokenIssuer` is the swap boundary (`TOKEN_ISSUER_IMPL`) — issuer-agnostic
 schema (`token_ref` / `token_claim_jti` / observed `token_expires_at`):
 
-- **`pelican`** (default, production): on upload approval the app runs
-  `pelican token create <osdf-uri> --write --issuer <issuer>
-  --scope-path <path-sans-namespace> -k <key> --lifetime <token_ttl_seconds>`;
-  stdout is the scoped write token handed to the job. issuer, key and the
-  scope path come from the **namespace registry** (below), so pelican never
-  has to ask the OSDF director which namespace owns the object — that lookup
-  (10 s deadline) was the source of most mint failures. Every failure path is
-  counted in `af3cache_token_issue_total` and logged with pelican's stderr.
+- **`inprocess`** (production): on upload approval the app signs the WLCG
+  write token itself with PyJWT — `iss`, private key and scope path from the
+  **namespace registry** (below), `kid` = the RFC 7638 thumbprint of the key
+  (exactly what pelican emits, so the origin's JWKS already lists it),
+  `scope = storage.create:<path-sans-namespace>`, `sub = pelican_client`.
+  No subprocess and no network: sub-millisecond, and immune to OSDF director
+  latency. Keys are parsed at startup (an unparseable / non-P-256 key stops
+  the container); rotating a key needs a restart.
+- **`pelican`** (fallback): the same token via `pelican token create <osdf-uri>
+  --write --issuer <issuer> --scope-path <path-sans-namespace> -k <key>
+  --lifetime <token_ttl_seconds>`; stdout is the token. pelican still queries
+  the OSDF director before signing (10 s cap) — the flags only make a director
+  failure non-fatal — so a slow director costs seconds per mint. Every failure
+  path of both impls is counted in `af3cache_token_issue_total`.
 - **`local`** (dev): self-sign a SciToken/WLCG JWT + publish JWKS; offline,
   unit-testable; honored by a live origin only once OSG registers the JWKS.
 - **`stub`** (tests) · **`oauth2`** (v0.2 — origin's OAuth2 issuer; drop-in).
@@ -249,8 +255,8 @@ the DB, never logged (a log filter redacts JWTs/keys).
 
 ## Status / open questions
 
-v0.1 PoC: protein chains, single job-contributed source, `pelican token
-create` issuance. Unresolved (per plan.md open Q#3): which OSDF origin/stores
+v0.1 PoC: protein chains, single job-contributed source, in-process (or
+`pelican token create`) issuance. Unresolved (per plan.md open Q#3): which OSDF origin/stores
 host the blobs and the credential authorizing `pelican token create` for the
 store namespaces — gates *live* token acceptance, not the API/schema. `local`
 self-signing and `oauth2` (v0.2) remain drop-in via `TOKEN_ISSUER_IMPL`.

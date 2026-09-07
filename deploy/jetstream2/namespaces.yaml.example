@@ -7,7 +7,10 @@
 # REPLACES the old PELICAN_TOKEN_ISSUER / PELICAN_TOKEN_PRIVATE_KEY /
 # PELICAN_STORE_NAMESPACES env vars. It is validated when the api starts:
 # a missing or invalid file, or an unreadable private_key, stops the container
-# (TOKEN_ISSUER_IMPL=pelican) instead of surfacing as 503s to OSPool jobs.
+# (TOKEN_ISSUER_IMPL=inprocess or pelican) instead of surfacing as 503s to
+# OSPool jobs. inprocess additionally parses each key at startup: it must be
+# an unencrypted EC P-256 (ES256) or RSA (RS256) PEM, and its RFC 7638
+# thumbprint (logged as kid= at startup) must be in the issuer's JWKS.
 #
 # Editing it needs `docker compose ... up -d --force-recreate api` — the file is
 # read once per process, and an in-place edit replaces the inode under a

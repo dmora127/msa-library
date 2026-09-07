@@ -10,7 +10,9 @@ OSPool job ──HTTPS──> Caddy (:443, auto LE cert) ──> api:8000 ──
 the API runs the full lifecycle but **logs the exact `pelican token create` /
 `pelican object get` commands instead of executing them** (the OSG issuer/store
 credential isn't ready). Uploads publish trusting the job-declared sha/size.
-Swap both to `pelican` later — no other change.
+Swap later to `TOKEN_ISSUER_IMPL=inprocess` (sign in process with the registry
+key; `pelican` is the shell-out fallback) and `OSDF_CLIENT_IMPL=pelican` — no
+other change.
 
 Prereq: phase-1 DB is up (`docker compose -f docker-compose.prod.yml ps` shows
 `db` healthy).
@@ -164,10 +166,10 @@ cp namespaces.yaml.example namespaces.yaml && chmod 600 namespaces.yaml
 # edit: issuer URL, private_key: /keys/community.pem, capacity_tb
 ```
 (mounted by `docker-compose.api.yml` at `/etc/af3cache/namespaces.yaml`; the
-api will not start in pelican mode without a valid one)
+api will not start in inprocess/pelican mode without a valid one)
 
 ```
-TOKEN_ISSUER_IMPL=pelican
+TOKEN_ISSUER_IMPL=inprocess     # or pelican: same token via `pelican token create`
 OSDF_CLIENT_IMPL=pelican
 PELICAN_TOKEN_BINARY=/usr/local/bin/pelican
 OSDF_PELICAN_BINARY=/usr/local/bin/pelican
@@ -180,6 +182,8 @@ PELICAN_NAMESPACES_FILE=/etc/af3cache/namespaces.yaml
 docker compose -f docker-compose.prod.yml -f docker-compose.api.yml up -d --build --force-recreate api
 docker exec af3cache-api-1 pelican --version                     # the baked-in version
 docker exec af3cache-api-1 pelican object ls osdf:///af3-msa-library/    # read creds OK?
+docker compose -f docker-compose.prod.yml -f docker-compose.api.yml logs api | grep "inprocess issuer"
+# kid=<thumbprint> must appear in <issuer host>/.well-known/issuer.jwks
 ```
 
 **d. Bulk ingest MUST use `--skip-verify`.** With `OSDF_CLIENT_IMPL=pelican` the

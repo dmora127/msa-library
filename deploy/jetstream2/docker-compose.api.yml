@@ -38,7 +38,7 @@ services:
       # .env.api. NOTE: /opt/diamond MUST exist on the host (empty dir is fine
       # for noop classifier deployments — `sudo mkdir -p /opt/diamond`).
       - /opt/diamond:/opt/diamond:ro
-      # TOKEN_ISSUER_IMPL=pelican: the namespace registry (namespaces.yaml, copy
+      # TOKEN_ISSUER_IMPL=inprocess/pelican: the namespace registry (namespaces.yaml, copy
       # of namespaces.yaml.example) lists every OSDF namespace with its issuer,
       # private key path and capacity. PELICAN_NAMESPACES_FILE (.env.api) is
       # the in-container path. The api validates it at startup and will NOT
