@@ -10,6 +10,41 @@
 # PUBLIC_HOST + CADDY_TLS come from .env.api (preserved on the VM, never
 # rsynced), so this committed file is safe to overwrite on every deploy.
 
+# Global options. `log default` reconfigures Caddy's own logger (TLS, proxy
+# errors, warnings). Those error lines embed the full request -- including the
+# client's X-Api-Key -- so the key is deleted before the line is written.
+# Cookie/Authorization are already redacted by Caddy; X-Api-Key is ours, so it
+# is not. Format stays json (what `docker logs` has always shown here).
+{
+	log default {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>X-Api-Key delete
+			}
+		}
+	}
+}
+
+# Per-request access log, one json line per request to stdout -> `docker logs
+# af3cache-caddy-1`. This is the ONLY place the real client IP is recorded
+# (`request.client_ip`): uvicorn behind the proxy sees Caddy's compose IP unless
+# FORWARDED_ALLOW_IPS is set (docker-compose.api.yml). Same X-Api-Key scrub as
+# above. Imported by every public hostname. Retention is the caddy service's
+# json-file rotation (50m x 5); a Grafana tab on 1s refresh writes ~2KB/req.
+(access_log) {
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>X-Api-Key delete
+			}
+		}
+	}
+}
+
 # Shared API-edge hardening: block /metrics + /readyz from the public edge,
 # then proxy everything else to the API. Imported by every public hostname so
 # the guard can never drift between them.
@@ -26,6 +61,7 @@
 {$PUBLIC_HOST} {
 	{$CADDY_TLS}
 	encode gzip
+	import access_log
 
 	# Admin DB console. pgweb runs with --prefix=webdbinterface, so it expects
 	# the prefix in the path -> forward it unchanged (handle, not handle_path).
@@ -111,5 +147,6 @@
 # picks a permanent hostname.
 {$PUBLIC_HOST_ALT} {
 	encode gzip
+	import access_log
 	import api
 }

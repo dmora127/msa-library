@@ -27,6 +27,15 @@ services:
     env_file:
       - ./.env.prod        # DATABASE_URL (host `db`), DB creds
       - ./.env.api         # API keys, TOKEN/OSDF impl, PUBLIC_HOST, stores
+    environment:
+      # uvicorn honours X-Forwarded-For/-Proto only from proxies in this list
+      # (default 127.0.0.1, which Caddy is not), so without it every api log
+      # line shows Caddy's compose IP instead of the client's. `*` is safe
+      # because 8000 is `expose`d, never published: the only peers that can
+      # reach it are compose siblings. (Compose assigns the network subnet, so
+      # a literal CIDR here would silently break on network recreation.)
+      # Caddy 2.7+ overwrites incoming X-Forwarded-For, so it cannot be spoofed.
+      FORWARDED_ALLOW_IPS: "*"
     depends_on:
       db:
         condition: service_healthy

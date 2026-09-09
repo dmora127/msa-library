@@ -325,6 +325,26 @@ docker compose -f docker-compose.prod.yml -f docker-compose.api.yml ps
 
 Expect `af3cache-{db,api,pgweb,caddy}-1`. Only Caddy publishes ports (80/443).
 
+### Edge access logs and client IPs
+
+Caddy writes one json line per request to its container log; it is the only
+place the **real client IP** is recorded (`request.client_ip`). `X-Api-Key` is
+scrubbed from both the access log and Caddy's own error lines; `Cookie` /
+`Authorization` are redacted by Caddy itself.
+
+```bash
+# everything the edge saw in the last hour, one line per request
+docker logs --since 1h af3cache-caddy-1 2>&1 | grep '"logger":"http.log.access' \
+  | jq -r '[(.ts|todate), .request.client_ip, .status, .request.method, .request.uri] | @tsv'
+# who is scanning us (non-2xx, by client IP)
+docker logs --since 24h af3cache-caddy-1 2>&1 | grep '"logger":"http.log.access' \
+  | jq -r 'select(.status>=400) | .request.client_ip' | sort | uniq -c | sort -rn
+```
+
+The api's own uvicorn lines show the client IP too, because `FORWARDED_ALLOW_IPS=*`
+(docker-compose.api.yml) makes uvicorn trust Caddy's `X-Forwarded-For`. If a
+line shows a `172.x` compose address instead, that env var is missing.
+
 ## Phase 8 — Verify
 
 ```bash
