@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -83,12 +83,31 @@ class Settings(BaseSettings):
     # pelican_token_binary; both must exist INSIDE the api container.
     osdf_pelican_binary: str = "pelican"
     # Cap on concurrent pelican `object get` subprocesses (directread is heavy
-    # on the origin and each verify holds CPU + a /tmp file). Excess /complete
-    # requests queue at the semaphore; if they wait longer than
-    # verify_queue_timeout_seconds they get 503 osdf_unavailable (retryable —
-    # the ingestion row stays 'uploaded').
+    # on the origin and each verify holds CPU + a /tmp file). Verification runs
+    # in the background after a /complete callback; excess verifies queue at
+    # the semaphore, and one that waits longer than verify_queue_timeout_seconds
+    # is logged and left 'uploaded' for the abandoned-ingestion sweeper to
+    # retry (the job already got its answer).
     verify_concurrency: int = 4
     verify_queue_timeout_seconds: float = 60.0
+    # HTTP status of the immediate /complete answer. 202 is the honest code
+    # for "accepted, verifying in the background"; it stays 200 until the
+    # out-of-repo OSPool job wrapper is published with 202 handling.
+    upload_complete_async_status_code: int = 200
+    # On shutdown the lifespan hook waits this long for in-flight background
+    # verifications before cancelling them (rows stay 'uploaded'; the sweeper
+    # finishes them). Must fit inside docker's stop grace (default 10s) together
+    # with uvicorn's own request drain.
+    upload_verify_drain_seconds: float = 8.0
+
+    @field_validator("upload_complete_async_status_code")
+    @classmethod
+    def _accepted_status_code(cls, v: int) -> int:
+        # Fail fast at startup: anything else would silently change the
+        # contract every OSPool job wrapper is coded against.
+        if v not in (200, 202):
+            raise ValueError("UPLOAD_COMPLETE_ASYNC_STATUS_CODE must be 200 or 202")
+        return v
 
     # Sequence classifier (verify pipeline adds species + query_name):
     # `noop` (default; everything Unclassified — keeps the pipeline working

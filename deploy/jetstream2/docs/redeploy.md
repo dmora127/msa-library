@@ -413,7 +413,10 @@ reserving phantom bytes in the namespace capacity gate. `helpers/sweep_ingestion
 calls `POST /v1/admin/maintenance/sweep-ingestions` every 15 min:
 
 - every row older than `SWEEP_MIN_AGE_MINUTES` (30) is re-run through the normal
-  verify+publish pipeline — the same code a job's own `/complete` hits;
+  verify+publish pipeline — the same pipeline the API runs in the background
+  right after a job's `/complete` (the route itself only parks the row as
+  `uploaded` and answers; a background verify that fails, times out waiting for
+  a fetch slot, or is cut off by a restart leaves the row here for this sweep);
 - a row whose attempt still cannot fetch the object AND that is older than
   `SWEEP_MAX_AGE_HOURS` (24) is rejected with `reject_reason =
   "Expired - Upload unverifiable"`. Nothing on OSDF is deleted and
@@ -421,6 +424,15 @@ calls `POST /v1/admin/maintenance/sweep-ingestions` every 15 min:
 - breaker: if every attempt in a run failed with OSDF unavailable (≥ 3
   attempted), expiries are held that run — an OSDF outage must not convert real
   uploads into rejections.
+
+Two `.env.api` knobs belong to the callback side of this: `UPLOAD_COMPLETE_ASYNC_STATUS_CODE`
+(HTTP code of the immediate `/complete` answer — 200 until the OSPool job wrapper
+is published with 202 handling, then 202; flipping it is a `up -d --no-build
+--force-recreate api`, no rebuild) and `UPLOAD_VERIFY_DRAIN_SECONDS` (8: how long
+`docker compose stop api` waits for background verifies before cancelling them;
+keep it under docker's 10 s stop grace). Expect `stop api` to take up to that
+much longer while verifies are in flight; whatever is cancelled shows up in the
+log as `verify ingestion=… CANCELLED at shutdown` and is swept later.
 
 It is deliberately separate from `/maintenance/run` (below), which reaps. Before
 installing the cron line on a new instance, look first:
@@ -435,7 +447,10 @@ curl -sk -X POST https://$H/v1/admin/maintenance/sweep-ingestions -H "X-API-Key:
 
 The body may also carry `min_age_minutes`, `max_age_hours` (e.g. widen while
 debugging an origin problem) and `budget_seconds`. Log:
-`/mnt/pgdata/backups/sweep_ingestions.log`; metrics `af3cache_ingestion_sweep_total{outcome}`
+`/mnt/pgdata/backups/sweep_ingestions.log`; metrics `af3cache_upload_verify_total{outcome}`
+(the live background verifies: published / rejected / unverified / error /
+cancelled / not_scheduled, plus `af3cache_upload_verify_seconds` and
+`_inflight`), `af3cache_ingestion_sweep_total{outcome}`
 and the exporter's `af3cache_inflight_ingestions_count{age}` (alerts
 `af3-ingest-sweeper-stalled`, `af3-ingest-sweeper-errors`).
 

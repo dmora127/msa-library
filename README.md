@@ -35,9 +35,19 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
   capacity headroom (not retryable; see "Namespace registry").
 - `GET /v1/admin/namespaces` — every configured OSDF namespace with usage,
   capacity, headroom and whether the capacity gate admits new uploads.
-- `POST /v1/uploads/{id}/complete` — fetches the object from OSDF, re-verifies
-  sha256 + size + `.a3m` format + that the a3m's query hashes to the declared
-  sequence, then publishes it as source **`Community Contributed - Cached`**.
+- `POST /v1/uploads/{id}/complete` — the job's "object is on the origin"
+  callback. Parks the row as `uploaded` and answers **immediately** with
+  `status: "uploaded - pending verification"` + `osdf_uri` (HTTP code from
+  `UPLOAD_COMPLETE_ASYNC_STATUS_CODE`, 200 until the job wrapper accepts 202).
+  A background task then fetches the object from OSDF, re-verifies sha256 +
+  size + `.a3m` format + that the a3m's query hashes to the declared sequence,
+  and publishes it as source **`Community Contributed - Cached`** (or rejects
+  it, reason logged). A verify that cannot complete (OSDF down, no fetch slot
+  within `VERIFY_QUEUE_TIMEOUT_SECONDS`, crash, restart) is logged and the row
+  stays `uploaded` for the sweeper below — so a burst beyond
+  `VERIFY_CONCURRENCY` now surfaces ≥ 30 min later instead of as a 503 the job
+  retries. A repeat callback on a verified row returns the stored
+  `available`/`rejected` verdict with HTTP 200 (the only poll there is).
 - `GET /.well-known/jwks.json` — public keys, mounted **only** while we
   self-sign (gone once the origin's OAuth2 issuer is used).
 - `GET|PUT /v1/admin/config` — hot-adjustable max upload size, token TTL, OSDF
@@ -46,8 +56,10 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
   (query visibility; the community source's flag also gates job uploads).
 - `POST /v1/admin/maintenance/sweep-ingestions` — abandoned-upload sweeper
   (cron, 15 min): re-attempts every `pending`/`uploaded` ingestion older than
-  30 min through verify+publish; still unverifiable past 24 h → `rejected`
-  with reason `Expired - Upload unverifiable`. `dry_run` reports without acting.
+  30 min through verify+publish — also the retry path for background
+  verifications that did not complete; still unverifiable past 24 h →
+  `rejected` with reason `Expired - Upload unverifiable`. `dry_run` reports
+  without acting.
 - `POST /v1/admin/maintenance/run` — idle sweep + reaper (cron/scheduler hits
   this). Admin-key gated.
 - `POST /v2/query` — **experimental**: `/v1/query` plus an opt-in

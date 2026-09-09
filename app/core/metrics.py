@@ -37,8 +37,11 @@ from prometheus_client import Counter, Gauge, Histogram
 
 log = logging.getLogger("af3cache.metrics")
 
-# Buckets run out to 120s on purpose: the long tail is /v1/uploads/{id}/complete
-# blocking on a `pelican object get`, not ordinary API latency.
+# Buckets run out to 120s on purpose: the long tail is the admin surface
+# (/v1/admin/ingest verifying inline, the sweeper run), not ordinary API
+# latency. /v1/uploads/{id}/complete answers in milliseconds now; the
+# `pelican object get` time it used to carry lives in
+# af3cache_upload_verify_seconds.
 _REQ_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120)
 # OSDF fetches are whole-object downloads; seconds-to-minutes is normal.
 _FETCH_BUCKETS = (0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600)
@@ -153,6 +156,28 @@ NAMESPACE_ACCEPTING = Gauge(
     "af3cache_namespace_accepting",
     "1 if the capacity gate currently lets new uploads into the namespace, else 0.",
     ["namespace"],
+)
+
+# --- background upload verify ------------------------------------------------
+# POST /v1/uploads/{id}/complete answers at once; the fetch+verify+publish runs
+# as an asyncio task afterwards (app/services/upload_verifier.py). Outcomes:
+# published | rejected | unverified (OSDF unavailable / queue timeout, row left
+# 'uploaded' for the sweeper) | error (unexpected exception, same) | cancelled
+# (shutdown drain) | not_scheduled (task could not be created). The HTTP
+# histogram no longer sees any of this time, so it gets its own series.
+UPLOAD_VERIFY = Counter(
+    "af3cache_upload_verify_total",
+    "Background verifications after an upload-complete callback, by outcome.",
+    ["outcome"],
+)
+UPLOAD_VERIFY_SECONDS = Histogram(
+    "af3cache_upload_verify_seconds",
+    "Wall time of one background verification (fetch through publish).",
+    buckets=_FETCH_BUCKETS,
+)
+UPLOAD_VERIFY_INFLIGHT = Gauge(
+    "af3cache_upload_verify_inflight",
+    "Background verifications currently running or queued for a fetch slot.",
 )
 
 # --- abandoned-ingestion sweeper -------------------------------------------
@@ -287,6 +312,18 @@ def record_namespace_state(
     NAMESPACE_MIN_HEADROOM_PCT.labels(namespace=namespace).set(min_headroom_pct)
     NAMESPACE_ENABLED.labels(namespace=namespace).set(1 if enabled else 0)
     NAMESPACE_ACCEPTING.labels(namespace=namespace).set(1 if accepting else 0)
+
+
+@_safe
+def record_upload_verify(outcome: str, seconds: float | None = None) -> None:
+    UPLOAD_VERIFY.labels(outcome=outcome).inc()
+    if seconds is not None:
+        UPLOAD_VERIFY_SECONDS.observe(seconds)
+
+
+@_safe
+def record_upload_verify_inflight(delta: int) -> None:
+    UPLOAD_VERIFY_INFLIGHT.inc(delta)
 
 
 @_safe

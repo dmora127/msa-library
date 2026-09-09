@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -11,8 +14,23 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.services.deps import get_namespace_registry, get_token_issuer
+from app.services.deps import (
+    get_background_verifier,
+    get_namespace_registry,
+    get_token_issuer,
+)
 from app.services.token_issuer import JwksProvider
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Shutdown only. Uvicorn stops accepting, finishes the open requests
+    (milliseconds now that /complete no longer waits on OSDF), then runs this:
+    background verifications get UPLOAD_VERIFY_DRAIN_SECONDS to finish and are
+    cancelled after that -- their rows stay 'uploaded' for the sweeper. Keep
+    the drain inside docker's stop grace (10s default) or SIGKILL wins."""
+    yield
+    await get_background_verifier().drain(get_settings().upload_verify_drain_seconds)
 
 
 def create_app() -> FastAPI:
@@ -22,7 +40,7 @@ def create_app() -> FastAPI:
     # bad file into a container that never becomes healthy instead of a 503
     # storm to OSPool jobs. Cached, so get_token_issuer() below reuses it.
     get_namespace_registry()
-    app = FastAPI(title="af3-cache", version="0.1.0")
+    app = FastAPI(title="af3-cache", version="0.1.0", lifespan=_lifespan)
     register_exception_handlers(app)
     # CORS is owned HERE, not at the edge: the Caddyfile deliberately sets no
     # Access-Control-* headers, because Caddy's `header` directive REPLACES the

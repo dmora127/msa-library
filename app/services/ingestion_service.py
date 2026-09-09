@@ -2,7 +2,10 @@
 
 request_upload: declared-size guard BEFORE token issuance; idempotent per
 in-flight (seq_hash, source); token bound to the row by app-generated
-token_ref. complete_upload is added in the verification phase.
+token_ref. accept_upload is what the job callback hits: it parks the row in
+'uploaded' and answers at once; complete_upload is the synchronous
+verify+publish pipeline that BackgroundVerifier (right after the callback)
+and the abandoned-ingestion sweeper (retry) both run.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from app.core.metrics import record_token_issue
 from app.core.namespaces import NamespaceRegistry
 from app.schemas.ingestion import (
     DEFAULT_SOURCE,
+    PENDING_VERIFICATION_STATUS,
     UploadCompleteResponse,
     UploadRequest,
     UploadRequestResponse,
@@ -94,6 +98,26 @@ class IngestionService:
         self.classifier = classifier
         self.namespaces = namespaces
         self.capacity = capacity
+
+    def with_session(self, session: AsyncSession) -> IngestionService:
+        """Same process-wide collaborators (token issuer, OSDF client, a3m
+        validator, classifier, registry, capacity gate) bound to a different
+        session. BackgroundVerifier uses this to run the verify pipeline on its
+        own session after the request session is gone, while still honouring
+        whatever the request resolved for the shared deps (tests override the
+        OSDF client / classifier through dependency_overrides, and those
+        overrides must reach the background task too)."""
+        return IngestionService(
+            session,
+            self.tokens,
+            SettingsService(session, self.settings_service.settings),
+            self.osdf,
+            self.a3m,
+            SequenceService(session),
+            self.classifier,
+            self.namespaces,
+            self.capacity,
+        )
 
     async def _pick_namespace(self, template: str, *, refuse_when_full: bool) -> str:
         """Namespace for a NEW object: uniform random over the registry's
@@ -522,9 +546,14 @@ class IngestionService:
             ingestion_id=ingestion_id, status="available", osdf_uri=row.osdf_uri
         )
 
-    async def complete_upload(
-        self, ingestion_id: str, requester: str | None = None
-    ) -> UploadCompleteResponse:
+    async def _load_for_complete(self, ingestion_id: str):
+        """The row a completion callback acts on, or the terminal response if
+        there is nothing left to do. Shared by accept_upload and complete_upload
+        so the 404 / idempotency rules cannot drift between them.
+
+        Returns (row, terminal): exactly one is non-None. Callbacks are
+        at-least-once, so 'available' / 'rejected' rows answer with their
+        stored verdict and are never re-verified."""
         row = (
             await self.session.execute(
                 text(
@@ -540,16 +569,16 @@ class IngestionService:
         ).one_or_none()
         if row is None:
             raise IngestionNotFound(f"no ingestion {ingestion_id}")
-
-        # idempotency: callbacks are at-least-once; terminal states are no-ops
         if row.status in ("available", "rejected"):
-            return UploadCompleteResponse(
+            return None, UploadCompleteResponse(
                 ingestion_id=ingestion_id,
                 status=row.status,
                 reject_reason=row.reject_reason,
                 osdf_uri=row.osdf_uri if row.status == "available" else None,
             )
+        return row, None
 
+    async def _mark_uploaded(self, ingestion_id: str) -> None:
         await self.session.execute(
             text(
                 "update public.msa_ingestions set status='uploaded', "
@@ -558,6 +587,50 @@ class IngestionService:
             {"id": ingestion_id},
         )
 
+    async def accept_upload(
+        self, ingestion_id: str, requester: str | None = None
+    ) -> UploadCompleteResponse:
+        """The job callback: record that the object is on the origin and answer
+        immediately. Verification (fetch, sha/size/format/seq-hash checks,
+        publish) is NOT done here — the route hands the id to
+        BackgroundVerifier, which runs complete_upload on its own session.
+
+        The 'uploaded' flip is committed HERE, before the caller spawns the
+        task: the background session must see the row (and must not queue on
+        this request's row lock), and a failure after the spawn must not roll
+        the row back to 'pending' while a verify is already running.
+
+        Terminal rows short-circuit with their stored verdict — a job that
+        re-POSTs after verification finished gets 'available' / 'rejected',
+        which is the only "poll" the API offers."""
+        row, terminal = await self._load_for_complete(ingestion_id)
+        if terminal is not None:
+            return terminal
+
+        await self._mark_uploaded(ingestion_id)
+        await self.session.commit()
+        log.info(
+            "upload-complete ingestion=%s ACCEPTED requester=%s status_before=%s",
+            ingestion_id, requester, row.status,
+        )
+        return UploadCompleteResponse(
+            ingestion_id=ingestion_id,
+            status=PENDING_VERIFICATION_STATUS,
+            osdf_uri=row.osdf_uri,
+        )
+
+    async def complete_upload(
+        self, ingestion_id: str, requester: str | None = None
+    ) -> UploadCompleteResponse:
+        """Synchronous verify+publish: returns the final verdict. Run by
+        BackgroundVerifier right after a callback and by the abandoned-
+        ingestion sweeper as the retry path. The route itself uses
+        accept_upload. Idempotent on terminal rows."""
+        row, terminal = await self._load_for_complete(ingestion_id)
+        if terminal is not None:
+            return terminal
+
+        await self._mark_uploaded(ingestion_id)
         return await self._verify_and_publish(ingestion_id, row)
 
     async def _verify_and_publish(

@@ -17,6 +17,7 @@ from app.core.namespaces import (
     load_namespaces,
     namespaces_required,
 )
+from app.db.base import get_sessionmaker
 from app.db.session import get_session
 from app.services.a3m_validator import A3mValidator
 from app.services.classifier import Classifier, build_classifier
@@ -35,6 +36,7 @@ from app.services.similarity import (
     build_similarity_config,
 )
 from app.services.token_issuer import TokenIssuer, build_token_issuer
+from app.services.upload_verifier import BackgroundVerifier
 
 
 def get_sequence_service(
@@ -134,6 +136,15 @@ def get_ingestion_service(
         namespaces,
         capacity,
     )
+
+
+@lru_cache
+def get_background_verifier() -> BackgroundVerifier:
+    """Process-singleton: owns the table of in-flight background verifications
+    (one asyncio task per ingestion id) that the lifespan hook drains on
+    shutdown. The session factory is a lambda so the engine is built on first
+    use, not at import."""
+    return BackgroundVerifier(lambda: get_sessionmaker()())
 
 
 def get_ingestion_sweeper(

@@ -124,15 +124,51 @@ async def client(db_session) -> AsyncGenerator:
 
     from app.db.session import get_session
     from app.main import app
+    from app.services.deps import get_background_verifier
 
     async def _override():
         yield db_session
 
     app.dependency_overrides[get_session] = _override
+    # Background upload verification runs INLINE in tests (awaited inside the
+    # request) on the same rolled-back session, so a POST /complete's DB
+    # outcome is observable right after the response. The real @lru_cache
+    # verifier must never schedule a task here: each test has its own event
+    # loop and a task left on a closed loop fails the suite via
+    # filterwarnings=error.
+    app.dependency_overrides[get_background_verifier] = lambda: _inline_verifier(
+        db_session
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+def _inline_verifier(db_session):
+    """One BackgroundVerifier per test, memoised on the session so the route
+    and the `inline_verifier` fixture see the same instance."""
+    from contextlib import asynccontextmanager
+
+    from app.services.upload_verifier import BackgroundVerifier
+
+    v = getattr(db_session, "_af3_inline_verifier", None)
+    if v is None:
+
+        @asynccontextmanager
+        async def _same_session():
+            yield db_session  # never closed here: the db_session fixture owns it
+
+        v = BackgroundVerifier(_same_session, inline=True)
+        db_session._af3_inline_verifier = v
+    return v
+
+
+@pytest.fixture
+def inline_verifier(client, db_session):
+    """The inline BackgroundVerifier the `client` fixture installed, for tests
+    that want to spy on / replace `submit`."""
+    return _inline_verifier(db_session)
 
 
 NS_ISSUER = "https://issuer.test/api/v1.0/issuer/ns/af3-msa-library"

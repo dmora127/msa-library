@@ -130,9 +130,11 @@ docker compose -f docker-compose.prod.yml -f docker-compose.api.yml \
 ```
 
 Then `POST https://$H/v1/uploads/<id>/complete` (with the job key) → status
-`available`, logs the would-be `pelican object get …`, and the entry is now
-queryable. Browser: **https://<ip>.sslip.io/docs** (Swagger UI — explore/admin
-with the keys).
+`uploaded - pending verification` straight away; a moment later `logs api`
+shows the would-be `pelican object get …` and the `AVAILABLE` line, and the
+entry is queryable. A second `POST …/complete` returns `available` (that is
+how to poll). Browser: **https://<ip>.sslip.io/docs** (Swagger UI —
+explore/admin with the keys).
 
 ## 6. OSPool usage
 

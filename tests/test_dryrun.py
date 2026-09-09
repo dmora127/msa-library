@@ -1,6 +1,7 @@
 """Simulation mode: dryrun token issuer + OSDF client log the pelican
-commands they WOULD run and never execute; complete_upload publishes trusting
-declared metadata."""
+commands they WOULD run and never execute; the background verify (inline in
+tests) publishes trusting declared metadata. The /complete answer itself is
+the same "pending" body production returns."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from app.core.config import Settings
 from app.core.errors import OsdfUnavailable
 from app.core.hashing import sequence_hash
 from app.core.namespaces import NamespaceConfigError
+from app.schemas.ingestion import PENDING_VERIFICATION_STATUS
 from app.services.osdf_client import DryRunOsdfClient, build_osdf_client
 from app.services.token_issuer import (
     JwksProvider,
@@ -114,7 +116,7 @@ async def test_simulate_complete_publishes_and_is_queryable(
     )
     iid = req.json()["ingestion_id"]
     r = await client.post(f"/v1/uploads/{iid}/complete", headers=KEY)
-    assert r.json()["status"] == "available"
+    assert r.json()["status"] == PENDING_VERIFICATION_STATUS
 
     row = (
         await db_session.execute(
@@ -148,7 +150,13 @@ async def test_simulate_seq_hash_only_left_uploaded_not_published(
     )
     iid = req.json()["ingestion_id"]
     r = await client.post(f"/v1/uploads/{iid}/complete", headers=KEY)
-    assert r.json()["status"] == "uploaded"  # can't publish w/o sequence text
+    assert r.json()["status"] == PENDING_VERIFICATION_STATUS
+    st = (
+        await db_session.execute(
+            text("select status from public.msa_ingestions where id=:i"), {"i": iid}
+        )
+    ).scalar_one()
+    assert st == "uploaded"  # can't publish w/o sequence text
     n = (
         await db_session.execute(
             text("select count(*) from public.msa_cache_entries")

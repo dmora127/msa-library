@@ -15,6 +15,12 @@ from app.core.hashing import is_valid_seq_hash
 
 DEFAULT_SOURCE = "Community Contributed - Cached"
 
+# What POST /v1/uploads/{id}/complete answers on the first callback: the row is
+# parked in DB status 'uploaded' and verification runs in the background. Only
+# the response wording carries the "pending" part -- the status enum is not
+# extended.
+PENDING_VERIFICATION_STATUS = "uploaded - pending verification"
+
 
 class UploadRequest(BaseModel):
     sequence: str | None = Field(default=None, description="Raw amino-acid sequence")
@@ -64,6 +70,10 @@ class UploadCompleteRequest(BaseModel):
 
 class UploadCompleteResponse(BaseModel):
     ingestion_id: str
+    # "uploaded - pending verification" on the first callback (verify runs in
+    # the background); "available" / "rejected" (+ reject_reason) when a later
+    # callback finds the row already verified; "uploaded" only from the dryrun
+    # OSDF impl when it cannot publish without the sequence text.
     status: str
     reject_reason: str | None = None
     osdf_uri: str | None = None
