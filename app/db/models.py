@@ -21,7 +21,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -103,6 +103,12 @@ class MsaSource(Base):
     # NULL => never cull. Else a cache entry from this source goes stale after
     # N days WITHOUT a query hit (popularity-based, not time-since-upload).
     idle_ttl_days: Mapped[int | None] = mapped_column(Integer)
+    # SQL LIKE patterns. A community upload whose msa_ingestions.requester
+    # matches any element is published under THIS source instead (DB trigger,
+    # migration 0017). Nothing in the app reads it; documented here only.
+    authorized_requesters: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, default=list, server_default="{}"
+    )
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, default=dict, server_default="{}"
     )

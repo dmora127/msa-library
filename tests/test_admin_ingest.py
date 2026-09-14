@@ -340,3 +340,31 @@ async def test_admin_ingest_prefers_room_but_never_refuses(
         )
     ).scalar_one()
     assert ns == "af3-msa-library"  # column written on the admin path too
+
+
+async def test_admin_ingest_authorized_requester_keeps_asserted_source(
+    client, db_session, osdf_with_a3m
+):
+    """migration 0017: the requester->source flip applies only to COMMUNITY
+    uploads. An admin ingest asserting GDM for a requester that OSG-Generated
+    claims must stay GDM on both the entry and the audit row."""
+    r = await client.post(
+        "/v1/admin/ingest",
+        json=_body(requester="pipeline-bot@site-a.example.edu"),
+        headers=ADMIN,
+    )
+    assert r.status_code == 200, r.text
+    row = (
+        await db_session.execute(
+            text(
+                """
+                select i.source as ingestion_source, e.source as entry_source
+                  from public.msa_ingestions i
+                  join public.msa_cache_entries e on e.id = i.cache_entry_id
+                 where i.id = :id
+                """
+            ),
+            {"id": r.json()["ingestion_id"]},
+        )
+    ).one()
+    assert row.entry_source == "GDM" and row.ingestion_source == "GDM"
