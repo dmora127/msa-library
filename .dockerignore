@@ -14,8 +14,6 @@ htmlcov
 dist
 build
 *.egg-info
-supabase/.temp
-supabase/.branches
 deploy/**/.env.prod
 .claude
 # bulk FASTA exports in the repo root (hundreds of MB; never part of the image)

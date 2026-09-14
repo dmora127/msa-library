@@ -27,7 +27,6 @@ rsync -avz --delete \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
   --exclude '.pytest_cache' --exclude '.ruff_cache' \
   --exclude '.env' --exclude '.env.*' --exclude '*.env*' \
-  --exclude 'supabase/.temp' --exclude 'supabase/.branches' \
   --exclude '.claude' \
   ./ exouser@af3-caching:/opt/af3-cache/
 ```
