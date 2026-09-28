@@ -18,10 +18,10 @@ publishing community-contributed MSAs.
 ## Architecture
 
 ```
-OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / docker)
+OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL 
                           │
-                          ├─ TokenIssuer   (pelican token create; local/stub/oauth2)
-                          ├─ OsdfClient    (pelican CLI; stub in tests)
+                          ├─ TokenIssuer   (pelican token create)
+                          ├─ OsdfClient    (pelican CLI)
                           ├─ A3mValidator  (lenient .a3m sniff)
                           └─ SimilarityService (mmseqs2; ephemeral | snapshot targets)
 ```
@@ -29,6 +29,9 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL (Supabase / 
 - `POST /v1/query` — sequence/hash → cached hits (OSDF URL + metadata) or
   `found:false`. Reads the `msa_cache_lookup` **view**, so contributed entries
   surface identically to OSG/GDM/etc.
+- `POST /v2/query` — Functions similarly to `/v1/query`, but allows users to opt-in
+  to similarity-based searching on a cache miss by passing `similarity_search = true`.
+  **This route is still in development**. 
 - `POST /v1/uploads/request` — declared size/sha → refuses oversize **before**
   minting a scoped, time-limited write token; creates a `pending` ingestion.
   507 `namespace_full` when every enabled OSDF namespace is within its
@@ -120,18 +123,14 @@ schema (`token_ref` / `token_claim_jti` / observed `token_expires_at`):
   **namespace registry** (below), `kid` = the RFC 7638 thumbprint of the key
   (exactly what pelican emits, so the origin's JWKS already lists it),
   `scope = storage.create:<path-sans-namespace>`, `sub = pelican_client`.
-  No subprocess and no network: sub-millisecond, and immune to OSDF director
-  latency. Keys are parsed at startup (an unparseable / non-P-256 key stops
-  the container); rotating a key needs a restart.
+  In use due to poor OSDF director performance. Token minting skips the namespace
+  validation via director. Keys are parsed at startup; rotating a key needs a restart.
 - **`pelican`** (fallback): the same token via `pelican token create <osdf-uri>
   --write --issuer <issuer> --scope-path <path-sans-namespace> -k <key>
   --lifetime <token_ttl_seconds>`; stdout is the token. pelican still queries
   the OSDF director before signing (10 s cap) — the flags only make a director
   failure non-fatal — so a slow director costs seconds per mint. Every failure
   path of both impls is counted in `af3cache_token_issue_total`.
-- **`local`** (dev): self-sign a SciToken/WLCG JWT + publish JWKS; offline,
-  unit-testable; honored by a live origin only once OSG registers the JWKS.
-- **`stub`** (tests) · **`oauth2`** (v0.2 — origin's OAuth2 issuer; drop-in).
 
 ### Namespace registry + capacity gate
 
@@ -177,7 +176,7 @@ Jetstream2 VM  (floating IP <api-host-ip>, attached volume for DB data)
 
 - **Jetstream2** — the host: one Ubuntu VM with a floating public IP and an
   attached volume holding Postgres data + alignment staging. Postgres binds to
-  localhost only and is never internet-exposed.
+  localhost only.
 - **Caddy** — the public edge, and the only container publishing ports
   (80/443). It terminates HTTPS and reverse-proxies to the internal API
   (`api:8000`) and the DB console (`/webdbinterface` → pgweb). Jobs only ever
@@ -228,27 +227,6 @@ uv run pytest -q          # 79 tests
 uv run ruff check .
 ```
 
-## Pointing at a real Supabase project
-
-Use the **service-role / direct Postgres** connection string (the server
-intentionally bypasses RLS for writes; this DSN is the crown-jewel secret —
-env-only, gitignored):
-
-```bash
-DATABASE_URL=postgresql+asyncpg://postgres:<pw>@db.<ref>.supabase.co:5432/postgres
-```
-
-- **Fresh project:** `alembic upgrade head` creates everything.
-- **Project that already has plan.md's schema** (created via the SQL Editor):
-  `alembic stamp 0001` (mark the base as applied without re-running it), then
-  `alembic upgrade head` to apply only `0002`–`0008`.
-
-Migration `0001` reproduces plan.md's tables/view/RLS verbatim plus an
-idempotent `anon` role + explicit `anon` SELECT grants (no-op on Supabase,
-required on vanilla Postgres). The existing `tutorial-CHTC-AF3` client keeps
-working unmodified and additionally sees `Community Contributed - Cached`
-entries through the unchanged `msa_cache_lookup` view.
-
 ## Environment
 
 See `.env.example`. Key vars: `DATABASE_URL`, `API_KEYS` (comma-separated set,
@@ -270,5 +248,4 @@ the DB, never logged (a log filter redacts JWTs/keys).
 v0.1 PoC: protein chains, single job-contributed source, in-process (or
 `pelican token create`) issuance. Unresolved (per plan.md open Q#3): which OSDF origin/stores
 host the blobs and the credential authorizing `pelican token create` for the
-store namespaces — gates *live* token acceptance, not the API/schema. `local`
-self-signing and `oauth2` (v0.2) remain drop-in via `TOKEN_ISSUER_IMPL`.
+store namespaces.
