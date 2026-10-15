@@ -102,8 +102,8 @@ Exosphere's own mount.
 
 ## Phase 3 — Clone the repo
 
-The repo is private, so the VM needs its own **read-only deploy key** — do not
-copy another host's personal key.
+Give the VM its own dedicated **read-only deploy key** — do not copy another
+host's personal key.
 
 ```bash
 ssh-keygen -t ed25519 -C "af3-cache@$(hostname)" -f ~/.ssh/id_ed25519 -N ""
@@ -373,10 +373,10 @@ prompts for `PGWEB_AUTH_USER`/`PGWEB_AUTH_PASS`).
 
 ## Phase 9 — Cron
 
-All helper scripts now `cd "$HERE/.."` and work correctly from `helpers/`.
-(They previously did not — that, plus cron still pointing at the pre-`helpers/`
-paths, silently broke both backups for weeks. **Whenever you move or rename a
-helper, run it by hand once before trusting cron.**)
+All helper scripts `cd "$HERE/.."` and work from `helpers/`, so the cron lines
+below use the `helpers/` paths. A cron line that points at a stale path fails
+silently. **Whenever you move or rename a helper, run it by hand once before
+trusting cron.**
 
 ```bash
 crontab -e
@@ -496,7 +496,7 @@ Ping URLs go in `deploy/jetstream2/.af3cache-monitoring.env` (from
 so a clone at a different prefix works unchanged. Scripts skip the ping silently
 when a URL is unset — which is exactly why the trap below matters.
 
-> **Ordering trap, learned the hard way.** Source the env file **before** reading
+> **Ordering trap.** Source the env file **before** reading
 > the variable out of it. Getting this backwards leaves the ping URL empty, and
 > the script still exits 0 with a correct-looking log — the dead-man's switch just
 > quietly does nothing, which you would only discover during a real outage.
@@ -506,9 +506,9 @@ when a URL is unset — which is exactly why the trap below matters.
 ### Mail transport
 
 `MAILTO` only works if a mail transport is installed — `postfix` is **masked** on
-the Exosphere base image, so cron mail is silently discarded until you set this
-up. On one instance a failed-backup notification sat in the masked MTA's queue
-for two months.
+the Exosphere base image, so until you set this up cron mail is queued by the
+masked MTA and never delivered — a failed-backup notification simply never
+arrives.
 
 ```bash
 sudo apt-get install -y msmtp msmtp-mta      # msmtp-mta diverts /usr/sbin/sendmail

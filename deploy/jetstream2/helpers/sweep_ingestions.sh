@@ -10,8 +10,6 @@
 #     rejected as "Expired - Upload unverifiable";
 #   - if every attempt in a run failed with OSDF unavailable, expiries are held
 #     (an OSDF outage must not turn real uploads into rejections).
-# Replaces recover_stuck_uploads.sh (which re-drove 'uploaded' rows only, with
-# no age gating and no expiry).
 #
 # Cron entry (every 15 min):
 #   */15 * * * * /opt/af3-cache/deploy/jetstream2/helpers/sweep_ingestions.sh >> /mnt/pgdata/backups/sweep_ingestions.log 2>&1
