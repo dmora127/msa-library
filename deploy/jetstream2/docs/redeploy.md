@@ -688,15 +688,6 @@ throwaway, so production is unreachable by construction. Afterwards remove the
 root-owned `__pycache__` the container leaves behind:
 `sudo find /opt/af3-cache -name __pycache__ -type d -exec rm -rf {} +`
 
-> **Known failures (pre-existing, 3 of 168):** `test_no_credential_rejected`,
-> `test_complete_requires_api_key`, `test_request_requires_api_key` all fail with
-> `TypeError: not all arguments converted during string formatting`.
-> `RedactSecretsFilter._KV_RE` in `app/core/logging.py` matches the format string's
-> OWN placeholder in `app/core/security.py` (`x-api-key=%s` becomes
-> `x-api-key=<redacted>`), leaving zero placeholders with two args. In production
-> this silently kills that auth-rejection log line. Scheduled for the phase 4
-> logging rework.
-
 The `af3cache_reap_exposure` metric is **read-only**. It counts what the
 maintenance/reap job *would* delete. That job is deliberately not scheduled — see
 the Phase 9 warning.

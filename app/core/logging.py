@@ -1,8 +1,7 @@
 """Logging with secret redaction.
 
 A filter scrubs JWT-shaped strings and known credential key names from every log
-record so tokens / API keys never land in logs (mirrors the client plan's
-"never prints the API key" rule).
+record so tokens / API keys never land in logs.
 """
 
 from __future__ import annotations
@@ -24,13 +23,23 @@ def _redact(text: str) -> str:
 
 
 class RedactSecretsFilter(logging.Filter):
+    """Redact the rendered message, not the format string.
+
+    Interpolating first keeps the key=value pattern away from the format
+    string's own placeholders (``x-api-key=%s``), which it would otherwise
+    consume and leave the record with fewer placeholders than arguments.
+    """
+
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = _redact(record.msg)
-        if record.args:
-            record.args = tuple(
-                _redact(a) if isinstance(a, str) else a for a in record.args
-            )
+        if not isinstance(record.msg, str):
+            return True
+        try:
+            rendered = record.getMessage()
+        except (TypeError, ValueError):
+            # Malformed call site: leave the record alone so logging reports it.
+            return True
+        record.msg = _redact(rendered)
+        record.args = ()
         return True
 
 
