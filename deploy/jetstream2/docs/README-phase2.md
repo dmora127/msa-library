@@ -17,21 +17,11 @@ other change.
 Prereq: phase-1 DB is up (`docker compose -f docker-compose.prod.yml ps` shows
 `db` healthy).
 
-## 1. Re-sync the code (it changed since phase 1)
+## 1. Update the code on the VM
 
-On your **Mac**:
-
-```bash
-cd /path/to/af3-cache
-rsync -avz --delete \
-  --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
-  --exclude '.pytest_cache' --exclude '.ruff_cache' \
-  --exclude '.env' --exclude '.env.*' --exclude '*.env*' \
-  --exclude '.claude' \
-  ./ exouser@af3-caching:/opt/af3-cache/
-```
-
-(`.env.prod`/`.env.api` on the VM are untouched — they're excluded both ways.)
+Code is delivered by `git clone` / `git pull` into `/opt/af3-cache` — see
+`redeploy.md` Phase 3 and "Updating an instance afterwards". `.env.prod` /
+`.env.api` are gitignored, so a pull never touches them.
 
 ## 2. Close the security-group gate + open HTTPS
 
@@ -263,9 +253,10 @@ curl -s https://<fqdn>/healthz           # NO -k needed anymore
 
 ## Notes
 
-- **Simulation** (default): tokens are `SIMULATED-TOKEN.<jti>` and uploads are
-  published unverified (declared sha/size trusted). Section 7 is the real
-  cutover. Simplest alternative to bind-mounting pelican is installing it in the
+- **Simulation** (`TOKEN_ISSUER_IMPL=dryrun`; the code default is `pelican`
+  and production runs `inprocess`): tokens are `SIMULATED-TOKEN.<jti>` and
+  uploads are published unverified (declared sha/size trusted). Section 7 is
+  the real cutover. Simplest alternative to bind-mounting pelican is installing it in the
   Dockerfile.
 - **Persistence**: all services `restart: unless-stopped` + Docker enabled on
   boot; LE certs persist in the `caddy_data` volume.

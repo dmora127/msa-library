@@ -117,8 +117,6 @@ Add that key under **repo → Settings → Deploy keys → Add deploy key**, lea
 ssh -T git@github.com                              # expect "successfully authenticated"
 sudo mkdir -p /opt/af3-cache && sudo chown "$USER" /opt/af3-cache
 git clone <repo-ssh-url> /opt/af3-cache
-chmod +x /opt/af3-cache/deploy/jetstream2/helpers/reclassify*.sh \
-         /opt/af3-cache/deploy/jetstream2/helpers/similarity_*.sh   # no exec bit in git
 ```
 
 ## Phase 4 — Configuration
@@ -254,7 +252,7 @@ docker compose -f docker-compose.prod.yml ps                          # wait for
 ```bash
 docker compose -f docker-compose.prod.yml --profile tools run --rm migrate
 docker compose -f docker-compose.prod.yml --profile tools run --rm \
-  --entrypoint 'alembic current' migrate            # -> 0013 (head)
+  --entrypoint 'alembic current' migrate            # -> 0017 (head)
 ```
 
 `migrate` builds the app image, which downloads the pinned pelican release, so
@@ -313,7 +311,7 @@ union all select 'alembic',       max(version_num) from alembic_version;"
 
 `cache_entries` must be non-zero (a populated `msa_sequences` with an empty
 `msa_cache_entries` means every query returns `found:false`) and `alembic` must
-read `0013`.
+read `0017` (head).
 
 ## Phase 7 — API, DB console, edge
 
@@ -770,7 +768,7 @@ disagree with this file, this file is right.
   Exosphere mounts the volume at `/media/volume/<name>` and `/mnt/pgdata` is a
   symlink to it. `restart_procedures.md`'s claim that `/mnt/pgdata` is
   "`/etc/fstab`-mounted" is likewise wrong.
-- **Alembic head** is `0013`, not `0008`.
+- **Alembic head** is `0017`, not `0008`.
 - **Code delivery**: `README-phase2.md` §1 documents an rsync from a Mac. That
   predates the git repo; use `git clone` / `git pull`.
 - **`osdf_namespace_template`**: the code default is
@@ -950,8 +948,8 @@ Then install the two cron lines in Phase 9. Logs:
 Consecutive nightly exports overlap while a multi-day job is still running;
 that is by design (the box queues, the callback only touches rows still
 pending). Re-ingesting a sequence resets it to pending, so it simply appears in
-a later export. `/mnt/pgdata/reclass` (Phase 5) is no longer written by the
-API-driven path; the box retains each job's input (`input_retained`) instead.
+a later export. The API-driven path keeps no local copy of the export on this
+VM; the box retains each job's input (`input_retained`) instead.
 
 Grafana's "Classification (NR-BLAST reclassification)" row shows the
 classified / pending / unclassified split of ACTIVE entries (percent and count)

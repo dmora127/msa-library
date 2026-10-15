@@ -11,11 +11,14 @@ nudge.
 - **pgweb console** — now a first-class compose service at
   `https://$PUBLIC_HOST/webdbinterface` (no more SSH tunnel); recovers with the
   rest of the stack.
-- **Postgres data** — `/mnt/pgdata` is `/etc/fstab`-mounted (the line added at
-  first setup); the symlink to `/media/volume/af3-cache-volume` survives reboots.
+- **Postgres data** — `/mnt/pgdata` is a symlink to
+  `/media/volume/af3-cache-volume`, which Exosphere mounts on boot; there is no
+  `/etc/fstab` entry (see `redeploy.md` Phase 2). Confirm the volume is actually
+  mounted before trusting the stack: `findmnt -no SOURCE,TARGET /mnt/pgdata`.
 - **Caddy's local cert** — persisted in the `caddy_data` named volume.
 - **`/opt/af3-cache/`, `.env.api`, `.env.prod`** — they're files on the root disk.
-- **Cron jobs** (`backup.sh`, `reclassify.sh`) — crontab persists.
+- **Cron jobs** — crontab persists; the current set of entries is listed in
+  `redeploy.md` Phase 9.
 
 ## What does NOT auto-recover
 
@@ -36,7 +39,7 @@ systemctl is-active docker          # -> active
 docker ps                            # expect af3cache-{db,api,caddy}-1 healthy
 df -h /mnt/pgdata                    # confirm volume is mounted
 curl -sk https://<api-host-ip>.sslip.io/healthz   # {"status":"ok"}
-crontab -l                            # backup + reclassify lines still there
+crontab -l                            # cron entries still there (redeploy.md Phase 9)
 
 # 1. If anything is missing (rare — only if a container actually failed):
 cd /opt/af3-cache/deploy/jetstream2

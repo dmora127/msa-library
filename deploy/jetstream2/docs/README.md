@@ -63,7 +63,7 @@ cd /opt/af3-cache/deploy/jetstream2
 docker compose -f docker-compose.prod.yml up -d db
 docker compose -f docker-compose.prod.yml ps          # db healthy?
 
-# one-shot: builds the app image and runs `alembic upgrade head` (0001..0008)
+# one-shot: builds the app image and runs `alembic upgrade head` (0001..0017)
 docker compose -f docker-compose.prod.yml --profile tools run --rm migrate
 ```
 
@@ -75,7 +75,7 @@ docker compose -f docker-compose.prod.yml exec -T db \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
   "select tablename from pg_tables where schemaname='public' order by 1;"
 docker compose -f docker-compose.prod.yml --profile tools run --rm \
-  --entrypoint 'alembic current' migrate            # -> 0008 (head)
+  --entrypoint 'alembic current' migrate            # -> 0017 (head)
 ```
 
 Expect tables: `alembic_version, app_settings, msa_cache_entries,
@@ -87,7 +87,7 @@ sources (community `idle_ttl_days=90`), settings incl `reap_grace_hours`,
 
 ```bash
 crontab -e
-# 15 4 * * * /opt/af3-cache/deploy/jetstream2/backup.sh >> /mnt/pgdata/backups/backup.log 2>&1
+# 15 4 * * * /opt/af3-cache/deploy/jetstream2/helpers/backup.sh >> /mnt/pgdata/backups/backup.log 2>&1
 ```
 
 - `restart: unless-stopped` + Docker enabled on boot ⇒ Postgres returns after
@@ -111,4 +111,4 @@ crontab -e
 - [ ] OS patched (`unattended-upgrades` or periodic `apt upgrade`).
 
 Phase 2 (API container, HTTPS via Caddy/Traefik on 443, OSPool reachability)
-is a separate runbook — ping me when the DB is verified.
+is a separate runbook; proceed to it once the DB is verified.
