@@ -46,3 +46,6 @@ deploy/jetstream2/namespaces.yaml
 # small fixtures under tests/ stay committable.
 /*.fa
 /*.fasta
+
+# IDE state
+.idea/

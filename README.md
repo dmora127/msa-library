@@ -8,12 +8,11 @@ MSA'd thousands of times before. This service lets OSPool jobs **look up** a
 pre-computed `unpairedMsa` by sequence and, on a miss, **contribute** their
 freshly computed `.a3m` back into the cache safely.
 
-It is the **server side**. The read-only job-side client is specified
-separately in `tutorial-CHTC-AF3/plan.md` (a stdlib helper that talks to
-Supabase PostgREST directly). This repo **reuses that schema verbatim** and
-**adds the write-back ingestion pipeline** that the client plan deferred:
-scoped OSDF write-token issuance, integrity + format verification, and
-publishing community-contributed MSAs.
+It is the **server side**. The read-only job-side client (a stdlib helper that
+queries the cache directly) is maintained separately. This repo owns the
+schema and **adds the write-back ingestion pipeline**: scoped OSDF write-token
+issuance, integrity + format verification, and publishing
+community-contributed MSAs.
 
 ## Architecture
 
@@ -29,9 +28,6 @@ OSPool job ──HTTP──> FastAPI (this repo) ──> PostgreSQL
 - `POST /v1/query` — sequence/hash → cached hits (OSDF URL + metadata) or
   `found:false`. Reads the `msa_cache_lookup` **view**, so contributed entries
   surface identically to OSG/GDM/etc.
-- `POST /v2/query` — Functions similarly to `/v1/query`, but allows users to opt-in
-  to similarity-based searching on a cache miss by passing `similarity_search = true`.
-  **This route is still in development**. 
 - `POST /v1/uploads/request` — declared size/sha → refuses oversize **before**
   minting a scoped, time-limited write token; creates a `pending` ingestion.
   507 `namespace_full` when every enabled OSDF namespace is within its
@@ -110,8 +106,10 @@ coarsened bump (≤1 write/day per hot entry). Upload-request refuses a
 instead of recomputing; once stale it's contributable again. Objects are
 immutable & uniquely named (`…/{seq_hash}/{source_slug}/{ingestion_id}.a3m`).
 
-All `/v1/*` require a static API key (`X-API-Key:` or `Authorization: Bearer`).
-`/v1/admin/*` requires the admin key.
+`/v1/uploads/*` require a static API key (`X-API-Key:` or `Authorization:
+Bearer`), or a WLCG bearer token once `JWT_PUBLIC_KEY_FILE` + `TRUSTED_ISSUERS`
+are set. `/v1/admin/*` require the admin key. `/v1/query`, `/v2/query`,
+`/v1/stats` and `/healthz` are public reads.
 
 ## Token issuance
 
@@ -123,8 +121,8 @@ schema (`token_ref` / `token_claim_jti` / observed `token_expires_at`):
   **namespace registry** (below), `kid` = the RFC 7638 thumbprint of the key
   (exactly what pelican emits, so the origin's JWKS already lists it),
   `scope = storage.create:<path-sans-namespace>`, `sub = pelican_client`.
-  In use due to poor OSDF director performance. Token minting skips the namespace
-  validation via director. Keys are parsed at startup; rotating a key needs a restart.
+  Preferred because it needs no director round-trip per mint. Keys are parsed
+  at startup; rotating a key needs a restart.
 - **`pelican`** (fallback): the same token via `pelican token create <osdf-uri>
   --write --issuer <issuer> --scope-path <path-sans-namespace> -k <key>
   --lifetime <token_ttl_seconds>`; stdout is the token. pelican still queries
@@ -188,8 +186,9 @@ Jetstream2 VM  (floating IP <api-host-ip>, attached volume for DB data)
 TLS is currently Caddy's **internal CA** (self-signed): sslip.io is a shared
 domain that Let's Encrypt rate-limits, so clients pass `curl -k` / trust the
 local CA. A real domain flips Caddy to automatic Let's Encrypt via `PUBLIC_HOST`
-+ `CADDY_TLS` with no other change. Full runbook + cutover steps:
-`deploy/jetstream2/README-phase2.md`.
++ `CADDY_TLS` with no other change. Full runbook:
+`deploy/jetstream2/docs/redeploy.md`; TLS cutover steps:
+`deploy/jetstream2/docs/README-phase2.md`.
 
 ## Quick start (local)
 
@@ -198,7 +197,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh        # if needed
 docker compose up -d                                    # Postgres 16
 cp .env.example .env                                    # tweak as needed
 uv sync
-uv run alembic upgrade head                             # migrations 0001..0008
+uv run alembic upgrade head                             # all migrations
 uv run uvicorn app.main:app --reload
 ```
 
@@ -223,7 +222,7 @@ test is rolled back.
 
 ```bash
 docker compose up -d
-uv run pytest -q          # 79 tests
+uv run pytest -q
 uv run ruff check .
 ```
 
@@ -243,9 +242,13 @@ Env is the floor; `app_settings` rows (via `/v1/admin/config`)
 override the operational values at runtime. API keys are env-only — never in
 the DB, never logged (a log filter redacts JWTs/keys).
 
-## Status / open questions
+## Status
 
-v0.1 PoC: protein chains, single job-contributed source, in-process (or
-`pelican token create`) issuance. Unresolved (per plan.md open Q#3): which OSDF origin/stores
-host the blobs and the credential authorizing `pelican token create` for the
-store namespaces.
+v0.1: protein chains, a single job-contributed source, in-process (or
+`pelican token create`) issuance. The OSDF namespaces that host the objects and
+the signing credential for each are supplied per deployment through the
+namespace registry, so the code carries no store-specific configuration.
+
+## License
+
+Apache License 2.0. See [`LICENSE`](LICENSE).
