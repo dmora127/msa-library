@@ -2,17 +2,20 @@
 
 Job uploads can only be requested as 'Community Contributed - Cached'
 (app/schemas/ingestion.py DEFAULT_SOURCE; ingestion_service.request_upload
-rejects anything else). Some requesters (trusted CHTC/OSPool pipelines) are
-really OSG-Generated. Until now a nightly cron re-sourced those rows after the
-fact, so any consumer of GET /v1/stats that diffs consecutive days saw a large
-negative "Community Contributed" delta every night.
+rejects anything else). Some requesters are trusted pipelines whose uploads
+really belong to another source (e.g. OSG-Generated). Until now a nightly cron
+re-sourced those rows after the fact, so any consumer of GET /v1/stats that
+diffs consecutive days saw a large negative "Community Contributed" delta every
+night.
 
 This migration moves the mapping into the database so a matching upload is
 OSG-Generated from the moment it exists in msa_cache_entries:
 
 * `msa_sources.authorized_requesters text[]` — SQL LIKE patterns on the TARGET
   source row. A community upload whose msa_ingestions.requester matches any
-  element is published under that source instead. Seeded on 'OSG-Generated'.
+  element is published under that source instead. Empty by default: the
+  patterns are per-deployment operator data, set with an UPDATE on msa_sources
+  after this migration runs.
 * BEFORE INSERT trigger on msa_cache_entries (apply_requester_source_rule):
   looks up the in-flight ingestion being published via the existing partial
   unique index msa_ingestions_inflight_uniq (seq_hash, source, db_version)
@@ -35,9 +38,9 @@ Lock footprint: `add column ... default '{}'` on the 8-row msa_sources is
 instant. `create trigger` takes SHARE ROW EXCLUSIVE on its table — catalog-only
 and instant, but it queues behind any in-progress writer and blocks new writers
 while queued, hence the lock_timeout. Run with the api stopped (see
-deploy/jetstream2/docs/redeploy.md). No backfill here: run
-deploy/jetstream2/helpers/promote_requester_source.sh once after deploying (it
-now reads the same column and stays on cron as a safety net).
+deploy/jetstream2/docs/redeploy.md). No backfill here: set the patterns, then
+run deploy/jetstream2/helpers/promote_requester_source.sh once (it reads the
+same column and stays on cron as a safety net).
 
 Revision ID: 0017
 Revises: 0016
@@ -67,11 +70,6 @@ UPGRADE_STATEMENTS: list[str] = [
       'msa_ingestions.requester matches any element is published under THIS source '
       'instead. Applied by trigger msa_cache_entries_requester_source_bi at '
       'cache-entry insert; the nightly promote_requester_source.sh is a safety net.'
-    """,
-    """
-    update public.msa_sources
-       set authorized_requesters = array['pipeline-bot%', 'batch.runner@ap.example.org']
-     where name = 'OSG-Generated'
     """,
     f"""
     create or replace function public.apply_requester_source_rule() returns trigger

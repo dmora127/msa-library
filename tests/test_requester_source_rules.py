@@ -26,8 +26,12 @@ from app.services.osdf_client import DryRunOsdfClient, StubOsdfClient
 from tests.test_upload_complete import DV, KEY, _complete
 
 OSG = "OSG-Generated"
-CHTC = "pipeline-bot@site-a.example.edu"
-OSPOOL = "batch.runner@ap.example.org"
+# Fictional identities. The real patterns are per-deployment operator data set
+# with an UPDATE on msa_sources (never shipped in a migration), so each test
+# that needs them installs these inside its own rolled-back transaction.
+PATTERNS = ["pipeline-bot%", "batch.runner@ap.example.org"]
+PREFIX_MATCH = "pipeline-bot@site-a.example.edu"
+EXACT_MATCH = "batch.runner@ap.example.org"
 OTHER = "colleague@example.edu"
 
 # a fresh sequence per upload (each test rolls back, but keep them distinct
@@ -49,6 +53,18 @@ def dryrun_osdf():
     app.dependency_overrides[get_osdf_client] = lambda: c
     yield c
     app.dependency_overrides.pop(get_osdf_client, None)
+
+
+@pytest.fixture
+async def osg_claims(db_session):
+    """Install the LIKE patterns on OSG-Generated for this test only."""
+    await db_session.execute(
+        text(
+            "update public.msa_sources set authorized_requesters = cast(:p as text[]) "
+            "where name = :n"
+        ),
+        {"p": PATTERNS, "n": OSG},
+    )
 
 
 def _a3m(seq: str) -> bytes:
@@ -115,30 +131,24 @@ async def _entries_for(db_session, sequence):
     ).all()
 
 
-async def test_seed_lists_authorized_identities(db_session):
-    pats = (
-        await db_session.execute(
-            text("select authorized_requesters from public.msa_sources where name = :n"),
-            {"n": OSG},
-        )
-    ).scalar_one()
-    assert "pipeline-bot%" in pats and OSPOOL in pats
-    # nobody else claims requesters
-    others = (
+async def test_migration_ships_no_patterns(db_session):
+    """authorized_requesters is operator data: a fresh schema claims nothing."""
+    claimants = (
         await db_session.execute(
             text(
                 "select name from public.msa_sources "
-                "where cardinality(authorized_requesters) > 0 and name <> :n"
-            ),
-            {"n": OSG},
+                "where cardinality(authorized_requesters) > 0"
+            )
         )
     ).all()
-    assert others == []
+    assert claimants == []
 
 
-@pytest.mark.parametrize("requester", [CHTC, "pipeline-bot@site-a.example.edu", OSPOOL])
+@pytest.mark.parametrize(
+    "requester", [PREFIX_MATCH, "pipeline-bot@site-b.example.org", EXACT_MATCH]
+)
 async def test_authorized_requester_publishes_as_osg(
-    client, db_session, osdf_stub, requester
+    client, db_session, osdf_stub, osg_claims, requester
 ):
     req = await _upload(client, osdf_stub, requester=requester)
     row = await _rows(db_session, req["ingestion_id"])
@@ -154,7 +164,9 @@ async def test_authorized_requester_publishes_as_osg(
 
 
 @pytest.mark.parametrize("requester", [OTHER, None])
-async def test_other_requesters_stay_community(client, db_session, osdf_stub, requester):
+async def test_other_requesters_stay_community(
+    client, db_session, osdf_stub, osg_claims, requester
+):
     req = await _upload(client, osdf_stub, requester=requester)
     row = await _rows(db_session, req["ingestion_id"])
     assert row.status == "available"
@@ -162,19 +174,19 @@ async def test_other_requesters_stay_community(client, db_session, osdf_stub, re
 
 
 async def test_reupload_of_promoted_sequence_upserts_osg_row(
-    client, db_session, osdf_stub
+    client, db_session, osdf_stub, osg_claims
 ):
     """The BEFORE INSERT flip happens before ON CONFLICT arbitration, so a
     re-upload lands on the existing OSG-Generated row instead of creating the
     colliding community duplicate the old nightly job had to skip."""
-    first = await _upload(client, osdf_stub, requester=CHTC)
+    first = await _upload(client, osdf_stub, requester=PREFIX_MATCH)
     seq = first["sequence"]
     before = await _entries_for(db_session, seq)
     assert [e.source for e in before] == [OSG]
 
     # request_upload's AlreadyCached check looks for a live COMMUNITY entry
     # (API unchanged), so the re-upload goes through and must upsert the OSG row
-    second = await _upload(client, osdf_stub, requester=CHTC, sequence=seq)
+    second = await _upload(client, osdf_stub, requester=PREFIX_MATCH, sequence=seq)
     after = await _entries_for(db_session, seq)
     assert [e.source for e in after] == [OSG]
     assert after[0].id == before[0].id  # same row, refreshed
@@ -183,30 +195,32 @@ async def test_reupload_of_promoted_sequence_upserts_osg_row(
     assert row.cache_entry_id == before[0].id and row.ingestion_source == OSG
 
 
-async def test_empty_list_disables_the_flip(client, db_session, osdf_stub):
+async def test_empty_list_disables_the_flip(client, db_session, osdf_stub, osg_claims):
     await db_session.execute(
         text("update public.msa_sources set authorized_requesters = '{}' where name = :n"),
         {"n": OSG},
     )
-    req = await _upload(client, osdf_stub, requester=CHTC)
+    req = await _upload(client, osdf_stub, requester=PREFIX_MATCH)
     row = await _rows(db_session, req["ingestion_id"])
     assert row.entry_source == COMMUNITY and row.ingestion_source == COMMUNITY
 
 
-async def test_disabled_target_source_does_not_claim(client, db_session, osdf_stub):
+async def test_disabled_target_source_does_not_claim(
+    client, db_session, osdf_stub, osg_claims
+):
     await db_session.execute(
         text("update public.msa_sources set enabled = false where name = :n"), {"n": OSG}
     )
-    req = await _upload(client, osdf_stub, requester=CHTC)
+    req = await _upload(client, osdf_stub, requester=PREFIX_MATCH)
     row = await _rows(db_session, req["ingestion_id"])
     assert row.entry_source == COMMUNITY
 
 
-async def test_simulate_path_also_flips(client, db_session, dryrun_osdf):
+async def test_simulate_path_also_flips(client, db_session, dryrun_osdf, osg_claims):
     """Dryrun publish (declared metadata trusted) goes through the same
     msa_cache_entries insert, so the trigger applies there too."""
     seq = next(_SEQS)
-    req, _ = await _request(client, sequence=seq, requester=OSPOOL)
+    req, _ = await _request(client, sequence=seq, requester=EXACT_MATCH)
     r = await _complete(client, req["ingestion_id"])
     assert r.status_code == 200, r.text
     row = await _rows(db_session, req["ingestion_id"])
@@ -215,10 +229,10 @@ async def test_simulate_path_also_flips(client, db_session, dryrun_osdf):
 
 
 async def test_stats_counts_authorized_upload_as_osg_immediately(
-    client, db_session, osdf_stub
+    client, db_session, osdf_stub, osg_claims
 ):
     s0 = (await client.get("/v1/stats")).json()["data"]
-    await _upload(client, osdf_stub, requester=CHTC)
+    await _upload(client, osdf_stub, requester=PREFIX_MATCH)
     s1 = (await client.get("/v1/stats")).json()["data"]
     assert s1["osgGenerated"] == s0["osgGenerated"] + 1
     assert s1["communityContributed"] == s0["communityContributed"]

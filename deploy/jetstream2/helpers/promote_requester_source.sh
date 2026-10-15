@@ -1,18 +1,14 @@
 #!/usr/bin/env bash
 # promote_requester_source.sh — nightly safety net: re-source cache entries
 # from 'Community Contributed - Cached' to whichever msa_sources row lists the
-# contributing requester in its authorized_requesters (SQL LIKE patterns,
-# e.g. OSG-Generated: {pipeline-bot%, batch.runner@ap.example.org}).
+# contributing requester in its authorized_requesters (per-deployment SQL LIKE
+# patterns maintained by the operator; empty by default).
 #
-# Why: those requesters' uploads are OSPool/CHTC-generated MSAs that arrive
-# through the community upload pipeline. Since migration 0017 a DB trigger
-# applies the same mapping at publish time, so a normal run of this script
-# promotes nothing; it exists for the one-off backfill of pre-trigger rows and
-# as a catch-all. The OSG-Generated source has no idle TTL, so promoting also
-# makes entries permanent. Only rows whose CURRENT source is FROM_SOURCE are
-# touched. To change who is authorized, edit the column, not this script:
-#   update msa_sources set authorized_requesters = array['a@b', 'c%']
-#    where name = 'OSG-Generated';
+# Since migration 0017 a DB trigger applies the same mapping at publish time,
+# so a normal run of this script promotes nothing; it exists for the one-off
+# backfill of pre-trigger rows and as a catch-all. Only rows whose CURRENT
+# source is FROM_SOURCE are touched. Authorization lives in the column, not in
+# this script.
 #
 # Runs promote_requester_source.sql (same directory) in one transaction. Rows
 # that would collide with an existing target-source entry (a re-upload of an
